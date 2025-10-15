@@ -1,10 +1,52 @@
-"url ","","","","","","","","",""
-"https://httpstat.us/200?i=1 ","","","","","","","","",""
-"https://httpstat.us/200?i=2 ","","","","","","","","",""
-"https://httpstat.us/200?i=3 ","","","","","","","","",""
-"https://httpstat.us/200?i=4 ","","","","","","","","",""
-"https://httpstat.us/200?i=5 ","","","","","","","","",""
-"https://httpstat.us/200?i=6 ","","","","","","","","",""
-"https://httpstat.us/200?i=7 ","","","","","","","","",""
-"https://httpstat.us/200?i=8 ","","","","","","","","",""
-"https://httpstat.us/200?i=9 ","","","","","","","","",""
+﻿url
+https://httpstat.us/200?i=1
+https://httpstat.us/200?i=2
+https://httpstat.us/200?i=3
+https://httpstat.us/200?i=4
+https://httpstat.us/200?i=5
+https://httpstat.us/200?i=6
+https://httpstat.us/200?i=7
+https://httpstat.us/200?i=8
+https://httpstat.us/200?i=9
+https://httpstat.us/200?i=10
+https://httpstat.us/200?i=11
+https://httpstat.us/200?i=12
+https://httpstat.us/200?i=13
+https://httpstat.us/200?i=14
+https://httpstat.us/200?i=15
+https://httpstat.us/200?i=16
+https://httpstat.us/200?i=17
+https://httpstat.us/200?i=18
+https://httpstat.us/200?i=19
+https://httpstat.us/200?i=20
+https://httpstat.us/200?i=21
+https://httpstat.us/200?i=22
+https://httpstat.us/200?i=23
+https://httpstat.us/200?i=24
+https://httpstat.us/200?i=25
+https://example.com/?i=26
+https://www.iana.org/domains/reserved?i=27
+https://www.w3.org/TR/PNG/iso_8859-1.txt?i=28
+https://httpbin.org/get?i=29
+https://httpbin.org/uuid?i=30
+https://httpstat.us/500?i=31
+https://httpstat.us/500?i=32
+https://httpstat.us/502?i=33
+https://httpstat.us/502?i=34
+https://httpstat.us/503?i=35
+https://httpstat.us/503?i=36
+https://httpstat.us/504?i=37
+https://httpstat.us/504?i=38
+https://httpbin.org/status/500?i=39
+https://httpstat.us/500?sleep=200&i=40
+https://httpbin.org/delay/3?i=41
+https://httpbin.org/delay/3?i=42
+https://httpbin.org/delay/3?i=43
+https://httpbin.org/delay/3?i=44
+https://httpbin.org/delay/3?i=45
+https://httpbin.org/delay/4?i=46
+https://httpbin.org/delay/4?i=47
+https://httpbin.org/delay/4?i=48
+https://httpbin.org/delay/5?i=49
+https://httpbin.org/dela
+
