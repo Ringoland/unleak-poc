@@ -1,7 +1,6 @@
 # Unleak PoC
 
-**Day-0 baseline:** minimal Node server + sandbox endpoints + API stubs.  
-Goal: unblock the 10-day PoC so Builder can execute the Day-by-Day plan and hit the Gates.
+**Baseline to start off PoC** minimal Node server + sandbox endpoints + API stubs.  
 
 ---
 
