@@ -14,7 +14,7 @@ Expected:
 Terminal shows Unleak PoC listening on :3000
 Smoke output shows ok ✓, fail ✓ (expected), slow ✓ (...), then a runId and JSON
 
-## Endpoints
+## Endpoints here now. Check out Dev Spec doc for full list
 
 GET /ok – returns 200 { ok: true }
 
