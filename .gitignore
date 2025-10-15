@@ -5,3 +5,31 @@
 /*.log
 /tmp
 /data
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# TypeScript
+*.tsbuildinfo
+
+# Testing
+coverage
+*.test.js
+
+# IDE
+.idea
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# Build
+build/
+out/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
