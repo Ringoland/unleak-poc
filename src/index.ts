@@ -4,7 +4,7 @@ import morgan from 'morgan';
 import { config } from './config';
 import { initializeRedis } from './config/redis';
 import { initializeBullBoard, getBullBoardAdapter } from './config/bullBoard';
-import apiRoutes from './api';
+import apiRoutes from './api/index';
 import { errorHandler } from './api/middleware/errorHandler';
 import { bullBoardAuth } from './api/middleware/bullBoardAuth';
 import { logger } from './utils/logger';
