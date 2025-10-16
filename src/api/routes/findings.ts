@@ -46,12 +46,12 @@ router.post('/:id/reverify', async (req: Request, res: Response) => {
     await redis.setex(`reverify:${idempotencyKey}`, ttl, findingId);
 
     // Process reverification (placeholder)
-    res.json({
+    return res.json({
       id: findingId,
       reverifyStatus: 'accepted',
     });
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
