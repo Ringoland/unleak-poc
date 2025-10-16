@@ -10,6 +10,7 @@ import { createDirectFetcher } from './adapters/direct';
 import { createZenRowsFetcher } from './adapters/zenrows';
 import { logger } from '../../utils/logger';
 import { BreakerService } from '../breaker';
+import { config } from '../../config';
 
 export type FetcherAdapter = 'direct' | 'zenrows';
 
@@ -32,6 +33,11 @@ export class BreakerAwareFetcher implements IFetcher {
 
   async fetch(url: string, options: FetchOptions = {}): Promise<FetchResult> {
     const { targetId } = options;
+
+    // If breaker is disabled, skip all breaker logic
+    if (!config.circuitBreaker.enabled) {
+      return this.adapter.fetch(url, options);
+    }
 
     // If no targetId provided, skip breaker logic and use adapter directly
     if (!targetId) {

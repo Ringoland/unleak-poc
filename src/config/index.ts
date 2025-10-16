@@ -40,6 +40,7 @@ export const config = {
 
   // Circuit breaker config
   circuitBreaker: {
+    enabled: process.env.BREAKER_ENABLED === 'true',
     openMinutes: parseInt(process.env.BREAKER_OPEN_MINUTES || '20', 10),
     errorRateThresholdPct: parseInt(process.env.BREAKER_ERROR_RATE_THRESHOLD_PCT || '50', 10),
     errorRateWindow: parseInt(process.env.BREAKER_ERROR_RATE_WINDOW || '10', 10),
