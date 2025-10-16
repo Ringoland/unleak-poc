@@ -24,7 +24,7 @@ export function createFetcher(options: FetcherFactoryOptions = {}): IFetcher {
   switch (adapter) {
     case 'direct':
       return createDirectFetcher(options);
-    
+
     case 'zenrows':
       return createZenRowsFetcher(options);
 

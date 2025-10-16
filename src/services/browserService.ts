@@ -17,19 +17,19 @@ export class BrowserService {
     if (!this.browser) {
       await this.initialize();
     }
-    
+
     const page = await this.browser!.newPage();
     return page;
   }
 
   async scanUrl(url: string): Promise<{ screenshot: Buffer; title: string }> {
     const page = await this.createPage();
-    
+
     try {
       await page.goto(url, { waitUntil: 'networkidle' });
       const title = await page.title();
       const screenshot = await page.screenshot();
-      
+
       return { screenshot, title };
     } finally {
       await page.close();

@@ -45,7 +45,7 @@ async function performScan(data: ScanJobData): Promise<void> {
   // Placeholder implementation
   // In a real implementation, this would use Playwright to scan the URL
   logger.info(`Scanning ${data.url} for finding ${data.findingId}`);
-  
+
   // Simulate async work
   await new Promise((resolve) => setTimeout(resolve, 1000));
 }

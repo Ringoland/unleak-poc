@@ -8,7 +8,7 @@ let scanQueue: Queue<ScanJobData> | null = null;
 export function getScanQueue(): Queue<ScanJobData> {
   if (!scanQueue) {
     const connection = getRedisClient();
-    
+
     const queueOptions: QueueOptions = {
       connection,
       defaultJobOptions: config.bullmq.defaultJobOptions,
@@ -22,7 +22,7 @@ export function getScanQueue(): Queue<ScanJobData> {
 
 export async function addScanJob(data: ScanJobData) {
   const queue = getScanQueue();
-  
+
   const job = await queue.add('scan', data, {
     jobId: `scan-${data.findingId}-${Date.now()}`,
   });

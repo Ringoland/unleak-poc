@@ -1,7 +1,7 @@
 export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '3000', 10),
-  
+
   // Database configuration
   database: {
     host: process.env.DB_HOST || 'localhost',
@@ -11,7 +11,7 @@ export const config = {
     password: process.env.DB_PASSWORD || undefined,
     maxConnections: parseInt(process.env.DB_MAX_CONNECTIONS || '10', 10),
   },
-  
+
   // Redis configuration
   redis: {
     host: process.env.REDIS_HOST || 'localhost',
@@ -19,7 +19,7 @@ export const config = {
     password: process.env.REDIS_PASSWORD || undefined,
     db: parseInt(process.env.REDIS_DB || '0', 10),
   },
-  
+
   // BullMQ configuration
   bullmq: {
     defaultJobOptions: {
@@ -30,18 +30,21 @@ export const config = {
       },
     },
   },
-  
+
   // Application-specific config
   reverifyTtlSeconds: parseInt(process.env.REVERIFY_TTL_SECONDS || '120', 10),
-  reverifyRatePerFindingPerHour: parseInt(process.env.REVERIFY_RATE_PER_FINDING_PER_HOUR || '5', 10),
-  
+  reverifyRatePerFindingPerHour: parseInt(
+    process.env.REVERIFY_RATE_PER_FINDING_PER_HOUR || '5',
+    10
+  ),
+
   // Circuit breaker config
   circuitBreaker: {
     openMinutes: parseInt(process.env.BREAKER_OPEN_MINUTES || '20', 10),
     errorRateThresholdPct: parseInt(process.env.BREAKER_ERROR_RATE_THRESHOLD_PCT || '50', 10),
     errorRateWindow: parseInt(process.env.BREAKER_ERROR_RATE_WINDOW || '10', 10),
   },
-  
+
   // External services
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || '',
   stripeApiKey: process.env.STRIPE_API_KEY || '',

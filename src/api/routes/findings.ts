@@ -18,7 +18,7 @@ router.post('/:id/reverify', async (req: Request, res: Response) => {
 
     // Check if this idempotency key was already used
     const existing = await redis.get(`reverify:${idempotencyKey}`);
-    
+
     if (existing) {
       return res.json({
         id: findingId,
@@ -29,7 +29,7 @@ router.post('/:id/reverify', async (req: Request, res: Response) => {
     // Check rate limit for this finding
     const rateLimitKey = `reverify:rate:${findingId}`;
     const requestCount = await redis.incr(rateLimitKey);
-    
+
     if (requestCount === 1) {
       await redis.expire(rateLimitKey, 3600); // 1 hour window
     }

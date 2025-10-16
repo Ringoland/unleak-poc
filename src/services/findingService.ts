@@ -7,7 +7,7 @@ export class FindingService {
       url,
       status: 'pending',
     };
-    
+
     const [result] = await db.insert(findings).values(newFinding).returning();
     return result;
   }
@@ -18,10 +18,7 @@ export class FindingService {
   }
 
   async updateFindingStatus(id: string, status: string): Promise<void> {
-    await db
-      .update(findings)
-      .set({ status, updatedAt: new Date() })
-      .where(eq(findings.id, id));
+    await db.update(findings).set({ status, updatedAt: new Date() }).where(eq(findings.id, id));
   }
 
   async listFindings(limit = 100, offset = 0): Promise<Finding[]> {
@@ -31,7 +28,7 @@ export class FindingService {
       .orderBy(desc(findings.createdAt))
       .limit(limit)
       .offset(offset);
-    
+
     return results;
   }
 }

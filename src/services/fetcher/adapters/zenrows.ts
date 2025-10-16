@@ -14,7 +14,9 @@ export class ZenRowsFetcher implements IFetcher {
     this.debug = options.debug || false;
 
     if (!this.apiKey && this.debug) {
-      logger.warn('[ZenRowsFetcher] No API key provided. Set ZENROWS_API_KEY environment variable.');
+      logger.warn(
+        '[ZenRowsFetcher] No API key provided. Set ZENROWS_API_KEY environment variable.'
+      );
     }
   }
 

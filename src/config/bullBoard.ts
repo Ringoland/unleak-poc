@@ -16,11 +16,9 @@ let bullBoard: ReturnType<typeof createBullBoard> | null = null;
 export function initializeBullBoard() {
   try {
     const scanQueue = getScanQueue();
-    
+
     bullBoard = createBullBoard({
-      queues: [
-        new BullMQAdapter(scanQueue),
-      ],
+      queues: [new BullMQAdapter(scanQueue)],
       serverAdapter,
     });
 
