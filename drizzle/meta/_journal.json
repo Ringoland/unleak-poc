@@ -8,6 +8,13 @@
       "when": 1760563601080,
       "tag": "0000_hard_justin_hammer",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1760601774884,
+      "tag": "0001_free_johnny_storm",
+      "breakpoints": true
     }
   ]
 }

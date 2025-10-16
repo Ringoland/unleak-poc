@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { parse } from 'csv-parse/sync';
 
-const ALLOW_LIST_PATH = path.resolve(__dirname, '../../config/allow-list.csv');
+const ALLOW_LIST_PATH = path.resolve(__dirname, '../config/allow-list.csv');
 
 interface AllowListRow {
   url?: string;
@@ -14,7 +14,12 @@ export function loadAllowList(): string[] {
     return [];
   }
 
-  const content = fs.readFileSync(ALLOW_LIST_PATH, 'utf-8');
+  let content = fs.readFileSync(ALLOW_LIST_PATH, 'utf-8');
+
+  // 🔧 Remove potential BOM character at start of file
+  if (content.charCodeAt(0) === 0xfeff) {
+    content = content.slice(1);
+  }
 
   const records = parse(content, {
     columns: true,
@@ -29,9 +34,6 @@ export function loadAllowList(): string[] {
   return urls;
 }
 
-/**
- * Checks if a given URL is allow-listed.
- */
 export function isAllowListed(url: string): boolean {
   const allowList = loadAllowList();
   return allowList.includes(url);

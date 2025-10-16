@@ -19,14 +19,17 @@ export interface FetchOptions {
 
   /** Additional fetch options */
   fetchOptions?: RequestInit;
+
+  /** Target ID for circuit breaker tracking */
+  targetId?: string;
 }
 
 /**
  * Result from a fetch operation
  */
 export interface FetchResult {
-  /** HTTP status code */
-  status: number;
+  /** HTTP status code (null if skipped by breaker) */
+  status: number | null;
 
   /** Response body (if successful) */
   body?: string;
@@ -45,6 +48,12 @@ export interface FetchResult {
 
   /** Response headers */
   headers?: Record<string, string>;
+
+  /** Was the request skipped by circuit breaker? */
+  skipped?: boolean;
+
+  /** Reason for skip (e.g., 'breaker_open') */
+  reason?: string;
 }
 
 export interface IFetcher {
