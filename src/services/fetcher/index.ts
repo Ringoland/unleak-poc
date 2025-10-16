@@ -6,6 +6,7 @@ export { DirectFetcher, createDirectFetcher } from './adapters/direct';
 
 import { IFetcher, FetcherAdapterOptions } from './types';
 import { createDirectFetcher } from './adapters/direct';
+import { createZenRowsFetcher } from './adapters/zenrows';
 import { logger } from '../../utils/logger';
 
 export type FetcherAdapter = 'direct' | 'zenrows';
@@ -23,6 +24,9 @@ export function createFetcher(options: FetcherFactoryOptions = {}): IFetcher {
   switch (adapter) {
     case 'direct':
       return createDirectFetcher(options);
+    
+    case 'zenrows':
+      return createZenRowsFetcher(options);
 
     default:
       logger.warn(`[Fetcher] Unknown adapter: ${adapter}, falling back to direct`);
