@@ -256,10 +256,17 @@ All queues use BullMQ with the following defaults:
 ```typescript
 {
   id: uuid (PK),
-  submitted: timestamp,
-  count: integer,
-  status: enum (pending, in_progress, completed, failed),
-  metadata: jsonb
+  status: string,                      // e.g., 'queued', 'running', 'completed'
+  runType: string,                     // e.g., 'scheduled', 'manual'
+  submittedAt: timestamp,
+  startedAt: timestamp | null,
+  completedAt: timestamp | null,
+  urlCount: integer,                   // Number of URLs scanned
+  findingCount: integer,               // Number of findings detected
+  payload: jsonb | null,               // Input payload for the run
+  error: jsonb | null,                 // Error details if failed
+  createdAt: timestamp,
+  updatedAt: timestamp
 }
 ```
 
@@ -267,12 +274,19 @@ All queues use BullMQ with the following defaults:
 ```typescript
 {
   id: uuid (PK),
-  runId: uuid (FK → runs),
-  targetId: uuid (FK → targets),
-  detectorType: string,          // e.g., 'form.submit_blocked'
-  severity: enum (low, medium, high, critical),
-  status: enum (new, verified, false_positive, resolved),
-  evidence: jsonb,                // Detector-specific data
+  runId: uuid (FK → runs.id),
+  url: string,                         // Target URL
+  status: string,                      // e.g., 'pending', 'verified'
+  findingType: string | null,          // Type/category of finding
+  severity: string | null,             // e.g., 'low', 'medium', 'high'
+  title: string | null,                // Short summary
+  description: text | null,            // Detailed description
+  detectedValue: text | null,          // Extracted or matched value
+  context: text | null,                // Context info (DOM snippet, etc.)
+  fingerprint: string | null,          // Unique identifier per finding
+  falsePositive: boolean,              // Marked as false positive
+  verified: boolean,                   // Verified by reverification
+  metadata: jsonb | null,              // Arbitrary key/value data
   createdAt: timestamp,
   updatedAt: timestamp
 }
@@ -319,6 +333,49 @@ All queues use BullMQ with the following defaults:
 }
 ```
 
+#### `breaker_states`
+```typescript
+{
+  id: serial (PK),
+  serviceName: string,                 // Unique service identifier
+  state: string,                       // e.g., 'closed', 'open', 'half_open'
+  failureCount: integer,               // Consecutive failures
+  openedAt: timestamp | null,          // When breaker was opened
+  nextAttemptAt: timestamp | null,     // Next retry time
+  lastError: string | null,            // Last error message
+  successCount: integer,               // Successful requests count
+  isActive: boolean,                   // Whether breaker is enabled
+  createdAt: timestamp,
+  updatedAt: timestamp
+}
+```
+
+#### `reverify_keys`
+```typescript
+{
+  idempotencyKey: string (PK),
+  findingId: uuid (FK → findings.id),
+  status: string,                      // e.g., 'accepted', 'rate_limited'
+  createdAt: timestamp,
+  expiresAt: timestamp,                // TTL expiration time
+  completedAt: timestamp | null        // When reverification completed
+}
+```
+
+#### `reverify_counters`
+```typescript
+{
+  id: serial (PK),
+  findingId: uuid (FK → findings.id),
+  windowStart: timestamp,              // Beginning of rate window
+  windowEnd: timestamp,                // End of rate window
+  requestCount: integer,               // Number of reverification requests
+  lastRequestAt: timestamp | null,     // Last request time
+  createdAt: timestamp,
+  updatedAt: timestamp
+}
+```
+
 ### Foreign Key Relations
 
 ```
@@ -329,6 +386,8 @@ targets (1) ──► (N) findings
 runs (1) ──► (N) findings
 findings (1) ──► (N) artifacts
 findings (1) ──► (1) verifications
+findings (1) ──► (N) reverify_keys
+findings (1) ──► (N) reverify_counters
 ```
 
 ### Retention Policy
