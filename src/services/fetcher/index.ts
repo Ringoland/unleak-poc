@@ -3,6 +3,7 @@ export * from './retry';
 
 // Adapters
 export { DirectFetcher, createDirectFetcher } from './adapters/direct';
+export { ZenRowsFetcher, createZenRowsFetcher } from './adapters/zenrows';
 
 import { IFetcher, FetcherAdapterOptions } from './types';
 import { createDirectFetcher } from './adapters/direct';

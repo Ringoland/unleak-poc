@@ -1,7 +1,7 @@
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
-import { getScanQueue } from '../services/queueService';
+import { getScanQueue, getRenderQueue } from '../services/queueService';
 import { logger } from '../utils/logger';
 
 // Create Express adapter for Bull Board
@@ -16,13 +16,14 @@ let bullBoard: ReturnType<typeof createBullBoard> | null = null;
 export function initializeBullBoard() {
   try {
     const scanQueue = getScanQueue();
+    const renderQueue = getRenderQueue();
 
     bullBoard = createBullBoard({
-      queues: [new BullMQAdapter(scanQueue)],
+      queues: [new BullMQAdapter(scanQueue), new BullMQAdapter(renderQueue)],
       serverAdapter,
     });
 
-    logger.info('Bull Board initialized successfully');
+    logger.info('Bull Board initialized successfully with scan-queue and render-queue');
     return serverAdapter;
   } catch (error) {
     logger.error('Failed to initialize Bull Board:', error);

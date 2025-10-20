@@ -37,7 +37,7 @@ export class DirectFetcher implements IFetcher {
       return {
         ...result,
         latencyMs,
-        success: result.status >= 200 && result.status < 300,
+        success: result.status !== null && result.status >= 200 && result.status < 300,
       };
     } catch (error) {
       const latencyMs = Date.now() - startTime;
@@ -46,7 +46,7 @@ export class DirectFetcher implements IFetcher {
       logger.error(`[DirectFetcher] Failed to fetch ${url}`, { error: errorMessage });
 
       return {
-        status: 0,
+        status: null,
         error: errorMessage,
         latencyMs,
         success: false,
@@ -59,7 +59,7 @@ export class DirectFetcher implements IFetcher {
     url: string,
     options: FetchOptions,
     timeoutMs: number
-  ): Promise<Omit<FetchResult, 'latencyMs' | 'success'>> {
+  ): Promise<Omit<FetchResult, 'latencyMs' | 'success' | 'skipped' | 'reason'>> {
     // Create abort controller for timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);

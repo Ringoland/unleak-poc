@@ -1,6 +1,23 @@
 import { IFetcher, FetchOptions, FetchResult, FetcherAdapterOptions } from '../types';
 import { logger } from '../../../utils/logger';
 
+/**
+ * ZenRows-specific options
+ */
+interface ZenRowsOptions {
+  /** Enable JavaScript rendering */
+  jsRender?: boolean;
+
+  /** Use premium residential proxies */
+  premiumProxy?: boolean;
+
+  /** Wait time in milliseconds before returning */
+  waitFor?: number;
+
+  /** Enable CAPTCHA solving */
+  autoparse?: boolean;
+}
+
 export class ZenRowsFetcher implements IFetcher {
   private apiKey: string;
   // @ts-ignore - Used in future implementation
@@ -33,7 +50,7 @@ export class ZenRowsFetcher implements IFetcher {
     if (!this.apiKey) {
       const latencyMs = Date.now() - startTime;
       return {
-        status: 0,
+        status: null,
         error: 'ZenRows API key not configured. Set ZENROWS_API_KEY environment variable.',
         latencyMs,
         success: false,
@@ -84,23 +101,6 @@ export class ZenRowsFetcher implements IFetcher {
 
     return `${baseUrl}?${params.toString()}`;
   }
-}
-
-/**
- * ZenRows-specific options
- */
-interface ZenRowsOptions {
-  /** Enable JavaScript rendering */
-  jsRender?: boolean;
-
-  /** Use premium residential proxies */
-  premiumProxy?: boolean;
-
-  /** Wait time in milliseconds before returning */
-  waitFor?: number;
-
-  /** Enable CAPTCHA solving */
-  autoparse?: boolean;
 }
 
 /**
