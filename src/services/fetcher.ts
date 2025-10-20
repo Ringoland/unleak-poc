@@ -1,15 +1,12 @@
 import { IFetcher } from './fetcher/types';
-import { createBreakerAwareFetcher, FetcherFactoryOptions } from './fetcher/index';
-import { getBreakerService } from './breaker';
+import { createFetcher, FetcherFactoryOptions } from './fetcher/index';
 import { logger } from '../utils/logger';
 
 let fetcherInstance: IFetcher | null = null;
 
 export function initializeFetcher(options: FetcherFactoryOptions = {}): IFetcher {
   try {
-    const breaker = getBreakerService();
-
-    fetcherInstance = createBreakerAwareFetcher(breaker, {
+    fetcherInstance = createFetcher({
       adapter: options.adapter || 'direct',
       defaultTimeoutMs: options.defaultTimeoutMs || 30000,
       defaultRetries: options.defaultRetries || 3,
@@ -17,14 +14,14 @@ export function initializeFetcher(options: FetcherFactoryOptions = {}): IFetcher
       ...options,
     });
 
-    logger.info('[Fetcher] Initialized with breaker integration', {
+    logger.info('[Fetcher] Initialized', {
       adapter: options.adapter || 'direct',
       timeout: options.defaultTimeoutMs || 30000,
     });
 
     return fetcherInstance;
   } catch (error) {
-    logger.error('[Fetcher] Failed to initialize with breaker', error);
+    logger.error('[Fetcher] Failed to initialize', error);
     throw error;
   }
 }

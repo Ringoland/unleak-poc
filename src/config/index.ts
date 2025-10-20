@@ -31,21 +31,6 @@ export const config = {
     },
   },
 
-  // Application-specific config
-  reverifyTtlSeconds: parseInt(process.env.REVERIFY_TTL_SECONDS || '120', 10),
-  reverifyRatePerFindingPerHour: parseInt(
-    process.env.REVERIFY_RATE_PER_FINDING_PER_HOUR || '5',
-    10
-  ),
-
-  // Circuit breaker config
-  circuitBreaker: {
-    enabled: process.env.BREAKER_ENABLED === 'true',
-    openMinutes: parseInt(process.env.BREAKER_OPEN_MINUTES || '20', 10),
-    errorRateThresholdPct: parseInt(process.env.BREAKER_ERROR_RATE_THRESHOLD_PCT || '50', 10),
-    errorRateWindow: parseInt(process.env.BREAKER_ERROR_RATE_WINDOW || '10', 10),
-  },
-
   // External services
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || '',
   stripeApiKey: process.env.STRIPE_API_KEY || '',
