@@ -203,17 +203,6 @@ export function createFetcher(options: FetcherFactoryOptions = {}): IFetcher {
 
 let defaultFetcherInstance: IFetcher | null = null;
 
-/**
- * Create a breaker-aware fetcher with the specified adapter and breaker service
- */
-export function createBreakerAwareFetcher(
-  breaker: BreakerService,
-  options: FetcherFactoryOptions = {}
-): IFetcher {
-  const adapter = createFetcher(options);
-  return new BreakerAwareFetcher(adapter, breaker);
-}
-
 export function getDefaultFetcher(): IFetcher {
   if (!defaultFetcherInstance) {
     defaultFetcherInstance = createDirectFetcher({
