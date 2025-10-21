@@ -54,8 +54,8 @@ async function startServer() {
       const redis = getRedisClient();
       initializeBreakerService(redis, {
         failThreshold: 3,
-        openDurationMs: config.circuitBreaker.openMinutes * 60 * 1000,
-        halfOpenProbeDelayMs: config.circuitBreaker.openMinutes * 60 * 1000,
+        openDurationMs: 20 * 60 * 1000, // 20 minutes
+        halfOpenProbeDelayMs: 40 * 60 * 1000, // 40 minutes (exponential backoff)
         failureWindowSize: config.circuitBreaker.errorRateWindow,
         failureRateThreshold: config.circuitBreaker.errorRateThresholdPct / 100,
       });
@@ -69,10 +69,6 @@ async function startServer() {
       defaultRetries: parseInt(process.env.FETCHER_RETRIES || '3'),
     });
     logger.info('Fetcher service initialized');
-
-    // Initialize Bull Board after Redis is ready
-    // Access at http://localhost:3000/admin/queues
-    // Protected by basic authentication (set BULL_BOARD_USERNAME and BULL_BOARD_PASSWORD env vars)
     try {
       initializeBullBoard();
       app.use('/admin/queues', bullBoardAuth, getBullBoardAdapter().getRouter());

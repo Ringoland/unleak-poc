@@ -18,8 +18,8 @@ export type BreakerState = 'open' | 'half_open' | 'closed';
 
 const DEFAULT_CONFIG: BreakerConfig = {
   failThreshold: 3,
-  openDurationMs: 30 * 60 * 1000, // 30 minutes
-  halfOpenProbeDelayMs: 60 * 60 * 1000, // 60 minutes
+  openDurationMs: 20 * 60 * 1000, // 20 minutes
+  halfOpenProbeDelayMs: 40 * 60 * 1000, // 40 minutes (exponential backoff)
   failureWindowSize: 10,
   failureRateThreshold: 0.5, // 50%
 };

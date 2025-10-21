@@ -302,7 +302,7 @@ BREAKER_ENABLED=true
   - Requests blocked for 20 minutes
 - **Half-Open** → After 20 minutes, allows ONE probe request
   - Success → closes circuit
-  - Failure → reopens for another 20 minutes
+  - Failure → reopens for 40 minutes (exponential backoff)
 
 **Monitor Breaker States:**
 ```bash
