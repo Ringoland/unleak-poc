@@ -127,15 +127,35 @@ export class BrowserService {
         });
       });
 
-      // Navigate to URL
+      // Navigate to URL with retry logic
       logger.info(`Navigating to ${url}`);
-      const response = await page.goto(url, {
-        waitUntil,
-        timeout,
-      });
+      let response;
+      let lastError;
+      const maxRetries = 3;
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          response = await page.goto(url, {
+            waitUntil,
+            timeout,
+          });
+          break; // Success, exit retry loop
+        } catch (error) {
+          lastError = error;
+          logger.warn(`Navigation attempt ${attempt}/${maxRetries} failed for ${url}:`, error instanceof Error ? error.message : String(error));
+          
+          if (attempt < maxRetries) {
+            // Wait before retrying (exponential backoff)
+            const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
+            await page.waitForTimeout(waitTime);
+          }
+        }
+      }
 
       if (!response) {
-        throw new Error('Navigation failed: no response received');
+        // If all retries failed, throw a more descriptive error
+        const errorMessage = lastError instanceof Error ? lastError.message : String(lastError);
+        throw new Error(`Navigation failed after ${maxRetries} attempts: ${errorMessage}`);
       }
 
       const loadTime = Date.now() - startTime;

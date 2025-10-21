@@ -2,6 +2,7 @@ import { Router } from 'express';
 import findingsRouter from './routes/findings';
 import slackRouter from './routes/slack';
 import runsRouter from './routes/runs';
+import adminRouter from './routes/admin';
 
 const router: Router = Router();
 
@@ -9,5 +10,6 @@ const router: Router = Router();
 router.use('/findings', findingsRouter);
 router.use('/slack', slackRouter);
 router.use('/runs', runsRouter);
+router.use('/admin', adminRouter);
 
 export default router;

@@ -33,3 +33,5 @@ out/
 test-results/
 playwright-report/
 playwright/.cache/
+
+artifacts/
