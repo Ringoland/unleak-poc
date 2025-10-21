@@ -5,7 +5,7 @@ export * from './retry';
 export { DirectFetcher, createDirectFetcher } from './adapters/direct';
 export { ZenRowsFetcher, createZenRowsFetcher } from './adapters/zenrows';
 
-import { IFetcher, FetcherAdapterOptions, FetchOptions, FetchResult } from './types';
+import { IFetcher, FetcherAdapterOptions } from './types';
 import { createDirectFetcher } from './adapters/direct';
 import { createZenRowsFetcher } from './adapters/zenrows';
 import { logger } from '../../utils/logger';
