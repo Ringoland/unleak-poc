@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getRedisClient } from '../../config/redis';
+import { recordReverifyRequest } from '../../utils/metrics';
 
 const router: Router = Router();
 
@@ -17,12 +18,17 @@ router.post('/:id/reverify', async (req: Request, res: Response) => {
     const ttl = 120; // 120 seconds TTL
 
     // Check if this idempotency key was already used
-    const existing = await redis.get(`reverify:${idempotencyKey}`);
+    const keyName = `reverify:${idempotencyKey}`;
+    const existing = await redis.get(keyName);
 
     if (existing) {
+      const ttlSeconds = await redis.ttl(keyName);
+      recordReverifyRequest('duplicate_ttl');
       return res.json({
         id: findingId,
         reverifyStatus: 'duplicate_ttl',
+        error: 'duplicate_ttl',
+        ttlSecondsRemaining: Math.max(0, ttlSeconds),
       });
     }
 
@@ -36,6 +42,7 @@ router.post('/:id/reverify', async (req: Request, res: Response) => {
 
     const rateLimit = 5; // 5 requests per hour
     if (requestCount > rateLimit) {
+      recordReverifyRequest('rate_limited');
       return res.status(429).json({
         id: findingId,
         reverifyStatus: 'rate_limited',
@@ -46,6 +53,7 @@ router.post('/:id/reverify', async (req: Request, res: Response) => {
     await redis.setex(`reverify:${idempotencyKey}`, ttl, findingId);
 
     // Process reverification (placeholder)
+    recordReverifyRequest('accepted');
     return res.json({
       id: findingId,
       reverifyStatus: 'accepted',

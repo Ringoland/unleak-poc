@@ -303,6 +303,111 @@ export class BreakerService {
       };
     }
   }
+
+  /**
+   * Get stats for all tracked circuit breakers
+   */
+  async getAllStats(): Promise<
+    Array<{
+      targetId: string;
+      state: BreakerState;
+      failureCount: number;
+      successCount: number;
+      failureRate: number | null;
+      openedAt: string | null;
+      nextProbeAt: string | null;
+      lastError: string | null;
+      recentOutcomes: Array<{ outcome: 'success' | 'failure'; timestamp: string }>;
+      consecutiveFailures: number;
+    }>
+  > {
+    try {
+      // Get all breaker keys from Redis
+      const pattern = 'cb:*:state';
+      const stateKeys = await this.redis.keys(pattern);
+
+      // Extract target IDs from keys
+      const targetIds = stateKeys
+        .map((key) => {
+          const match = key.match(/^cb:(.+):state$/);
+          return match ? match[1] : null;
+        })
+        .filter((id): id is string => id !== null);
+
+      if (targetIds.length === 0) {
+        return [];
+      }
+
+      // Get stats for each target
+      const statsPromises = targetIds.map(async (targetId) => {
+        const keys = this.getKeys(targetId);
+        const [state, failCountStr, openedAtStr, nextProbeStr, window] = await Promise.all([
+          this.getState(targetId),
+          this.redis.get(keys.failCount),
+          this.redis.get(keys.openedAt),
+          this.redis.get(keys.nextProbe),
+          this.redis.lrange(keys.failureWindow, 0, this.config.failureWindowSize - 1),
+        ]);
+
+        const failCount = parseInt(failCountStr || '0', 10);
+        const openedAt = openedAtStr ? parseInt(openedAtStr, 10) : null;
+        const nextProbe = nextProbeStr ? parseInt(nextProbeStr, 10) : null;
+
+        let failureRate: number | null = null;
+        let successCount = 0;
+        const recentOutcomes: Array<{ outcome: 'success' | 'failure'; timestamp: string }> = [];
+
+        if (window.length > 0) {
+          const failures = window.filter((v) => v === '0').length;
+          successCount = window.filter((v) => v === '1').length;
+          failureRate = failures / window.length;
+
+          // Convert window to recent outcomes (most recent first)
+          window.forEach((value, index) => {
+            recentOutcomes.push({
+              outcome: value === '1' ? 'success' : 'failure',
+              timestamp: new Date(Date.now() - index * 1000).toISOString(), // Approximate timestamps
+            });
+          });
+        }
+
+        // Count consecutive failures from the window
+        let consecutiveFailures = 0;
+        for (const value of window) {
+          if (value === '0') {
+            consecutiveFailures++;
+          } else {
+            break;
+          }
+        }
+
+        return {
+          targetId,
+          state,
+          failureCount: failCount,
+          successCount,
+          failureRate,
+          openedAt: openedAt ? new Date(openedAt).toISOString() : null,
+          nextProbeAt: nextProbe ? new Date(nextProbe).toISOString() : null,
+          lastError: null, // Could be enhanced to track last error
+          recentOutcomes: recentOutcomes.slice(0, 10), // Last 10 outcomes
+          consecutiveFailures,
+        };
+      });
+
+      return await Promise.all(statsPromises);
+    } catch (error) {
+      logger.error('Failed to get all stats:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Manually reset a circuit breaker (admin action)
+   */
+  async reset(targetId: string): Promise<void> {
+    await this.resetCircuit(targetId);
+  }
 }
 
 let breakerInstance: BreakerService | null = null;

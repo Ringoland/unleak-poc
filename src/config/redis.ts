@@ -14,6 +14,7 @@ export async function initializeRedis(): Promise<Redis> {
     port: config.redis.port,
     password: config.redis.password,
     db: config.redis.db,
+    maxRetriesPerRequest: null, // Required for BullMQ
     retryStrategy: (times) => {
       const delay = Math.min(times * 50, 2000);
       return delay;

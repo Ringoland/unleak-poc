@@ -42,11 +42,38 @@ export function createRenderWorker() {
         await storageService.initialize();
 
         // Capture evidence using browser service
-        const evidence: EvidenceCapture = await browserService.captureEvidence(job.data.url, {
-          timeout: job.data.options?.timeout || 30000,
-          waitUntil: job.data.options?.waitUntil || 'networkidle',
-          captureHAR: job.data.options?.captureHAR !== false,
-        });
+        let evidence: EvidenceCapture;
+        try {
+          evidence = await browserService.captureEvidence(job.data.url, {
+            timeout: job.data.options?.timeout || 30000,
+            waitUntil: job.data.options?.waitUntil || 'networkidle',
+            captureHAR: job.data.options?.captureHAR !== false,
+          });
+        } catch (captureError) {
+          // If evidence capture fails completely, create a minimal error artifact
+          logger.error(`Failed to capture evidence for ${job.data.url}:`, captureError);
+          
+          // Save error information as console log artifact
+          const errorArtifact = {
+            findingId: job.data.findingId,
+            type: 'console_logs' as const,
+            data: [
+              {
+                timestamp: new Date().toISOString(),
+                type: 'error',
+                text: `Evidence capture failed: ${captureError instanceof Error ? captureError.message : String(captureError)}`,
+              },
+            ],
+          };
+          
+          await artifactService.saveArtifacts([errorArtifact]);
+          logger.warn(`Saved error artifact for failed evidence capture on ${job.data.url}`);
+          
+          // Re-throw to let BullMQ retry mechanism handle it
+          throw new Error(
+            `Evidence capture failed for ${job.data.url}: ${captureError instanceof Error ? captureError.message : String(captureError)}`
+          );
+        }
 
         logger.info(
           `Evidence captured for ${job.data.url}: ` +
@@ -117,6 +144,12 @@ export function createRenderWorker() {
         max: 10, // Max 10 jobs
         duration: 60000, // per minute
       },
+      settings: {
+        backoffStrategy: (attemptsMade: number) => {
+          // Exponential backoff: 2s, 4s, 8s, etc.
+          return Math.min(2000 * Math.pow(2, attemptsMade), 30000);
+        },
+      },
     }
   );
 
@@ -128,7 +161,8 @@ export function createRenderWorker() {
   });
 
   worker.on('failed', (job, err) => {
-    logger.error(`Render job ${job?.id} failed:`, err);
+    const attemptsLeft = job ? (job.attemptsMade || 0) : 0;
+    logger.error(`Render job ${job?.id} failed (attempt ${attemptsLeft}):`, err);
   });
 
   worker.on('error', (err) => {

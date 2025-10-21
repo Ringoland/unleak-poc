@@ -2,12 +2,15 @@ import 'dotenv/config';
 import express from 'express';
 import morgan from 'morgan';
 import { config } from './config';
-import { initializeRedis } from './config/redis';
+import { initializeRedis, getRedisClient } from './config/redis';
 import { initializeBullBoard, getBullBoardAdapter } from './config/bullBoard';
 import apiRoutes from './api/index';
 import { errorHandler } from './api/middleware/errorHandler';
 import { bullBoardAuth } from './api/middleware/bullBoardAuth';
 import { logger } from './utils/logger';
+import { getMetrics } from './utils/metrics';
+import { initializeBreakerService } from './services/breaker';
+import { initializeFetcher } from './services/fetcher';
 
 const app = express();
 const port = config.port;
@@ -19,6 +22,18 @@ app.use(morgan('combined'));
 // Health check endpoint
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Prometheus metrics endpoint
+app.get('/metrics', async (_req, res) => {
+  try {
+    res.set('Content-Type', 'text/plain; version=0.0.4');
+    const metrics = await getMetrics();
+    res.send(metrics);
+  } catch (error) {
+    logger.error('Error generating metrics:', error);
+    res.status(500).send('Error generating metrics');
+  }
 });
 
 // API routes
@@ -33,6 +48,27 @@ async function startServer() {
     // Initialize Redis connection
     await initializeRedis();
     logger.info('Redis connected successfully');
+
+    // Initialize Circuit Breaker service (if enabled)
+    if (config.circuitBreaker.enabled) {
+      const redis = getRedisClient();
+      initializeBreakerService(redis, {
+        failThreshold: 3,
+        openDurationMs: config.circuitBreaker.openMinutes * 60 * 1000,
+        halfOpenProbeDelayMs: config.circuitBreaker.openMinutes * 60 * 1000,
+        failureWindowSize: config.circuitBreaker.errorRateWindow,
+        failureRateThreshold: config.circuitBreaker.errorRateThresholdPct / 100,
+      });
+      logger.info('Circuit Breaker service initialized');
+    }
+
+    // Initialize Fetcher service
+    initializeFetcher({
+      adapter: (process.env.FETCHER_ADAPTER as 'direct' | 'zenrows') || 'direct',
+      defaultTimeoutMs: parseInt(process.env.FETCHER_TIMEOUT_MS || '30000'),
+      defaultRetries: parseInt(process.env.FETCHER_RETRIES || '3'),
+    });
+    logger.info('Fetcher service initialized');
 
     // Initialize Bull Board after Redis is ready
     // Access at http://localhost:3000/admin/queues

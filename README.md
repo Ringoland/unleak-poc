@@ -68,11 +68,45 @@ For more details on running Redis with Docker, see: [Redis Docker Official Image
 
 ### 6. Start Development Server
 
+**Option 1: All-in-One (Recommended)**
+
+Start the API server and both workers together:
+
 ```bash
 npm run dev
+# or
+pnpm dev
 ```
 
-The server will start on `http://localhost:8000` (or the port specified in your `.env` file).
+This will start:
+- 🔵 **API Server** on `http://localhost:8000`
+- 🟢 **Scan Worker** - Processes URL scanning jobs
+- 🟡 **Render Worker** - Captures screenshots and evidence with Playwright
+
+**Option 2: Start Services Individually**
+
+If you need to run services separately (useful for debugging):
+
+```bash
+# Terminal 1 - API Server only
+npm run dev:api
+
+# Terminal 2 - Scan Worker only
+npm run dev:scan
+
+# Terminal 3 - Render Worker only
+npm run dev:render
+```
+
+**Option 3: Workers Only**
+
+Run both workers without the API server:
+
+```bash
+npm run worker:all
+```
+
+> **Note**: The render worker requires Playwright browsers. These are automatically installed during `npm install` via the postinstall script. If you encounter browser-related errors, run: `npx playwright install chromium`
 
 ---
 
@@ -232,24 +266,223 @@ FETCHER_TIMEOUT_MS=30000
 FETCHER_RETRIES=3
 
 # External Services
-SLACK_WEBHOOK_URL=         # For alerts (not yet wired)
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
 
-# Circuit Breaker
-BREAKER_OPEN_MINUTES=20
-BREAKER_ERROR_RATE_THRESHOLD_PCT=50
+# Circuit Breaker (Day-3)
+BREAKER_ENABLED=false      # Set to 'true' to enable circuit breaker
+BREAKER_OPEN_MINUTES=20    # Duration circuit stays open (minutes)
+BREAKER_ERROR_RATE_THRESHOLD_PCT=50   # Error rate % to trigger open
+BREAKER_ERROR_RATE_WINDOW=10          # Window size for error rate calculation
 
-# Reverify Configuration
-REVERIFY_TTL_SECONDS=120
-REVERIFY_RATE_PER_FINDING_PER_HOUR=5
+# Reverify Configuration (Day-3)
+REVERIFY_TTL_SECONDS=120                  # Idempotency key TTL
+REVERIFY_RATE_PER_FINDING_PER_HOUR=5      # Max reverify requests per finding per hour
+
+# Base URL (for Slack action buttons)
+BASE_URL=http://localhost:8000
 ```
+
+---
+
+## Day-3: Circuit Breaker & Actionable Alerts
+
+### Circuit Breaker
+
+The application includes a per-host circuit breaker to prevent cascading failures.
+
+**Enable Circuit Breaker:**
+```bash
+# In .env file
+BREAKER_ENABLED=true
+```
+
+**How It Works:**
+- **Closed** → Normal operation, requests pass through
+- **Open** → Circuit opens after ≥3 consecutive failures OR ≥50% of last 10 requests fail
+  - Requests blocked for 20 minutes
+- **Half-Open** → After 20 minutes, allows ONE probe request
+  - Success → closes circuit
+  - Failure → reopens for another 20 minutes
+
+**Monitor Breaker States:**
+```bash
+curl http://localhost:8000/api/admin/breaker
+```
+
+Response:
+```json
+{
+  "timestamp": "2025-10-21T10:30:00Z",
+  "breakerCount": 2,
+  "breakers": [
+    {
+      "targetId": "httpbin.org",
+      "state": "open",
+      "failureCount": 5,
+      "successCount": 3,
+      "failureRate": 0.625,
+      "openedAt": "2025-10-21T10:15:00Z",
+      "nextProbeAt": "2025-10-21T10:35:00Z",
+      "recentOutcomes": [
+        { "outcome": "failure", "timestamp": "2025-10-21T10:14:58Z" },
+        { "outcome": "failure", "timestamp": "2025-10-21T10:14:57Z" }
+      ]
+    }
+  ]
+}
+```
+
+**Reset a Breaker (Admin):**
+```bash
+curl -X POST http://localhost:8000/api/admin/breaker/reset \
+  -H "Content-Type: application/json" \
+  -d '{"targetId": "httpbin.org"}'
+```
+
+### Slack Alerts
+
+Automated alerts are sent to Slack when:
+- **5xx errors** occur
+- **High latency** detected (>1500ms)
+- **Timeouts** or **network errors**
+
+**Setup:**
+```bash
+# Get a Slack webhook URL from: https://api.slack.com/messaging/webhooks
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+```
+
+**Alert Actions:**
+Each alert includes three action buttons:
+1. **✅ Ack** - Acknowledge the alert (tracked for 24 hours)
+2. **🔇 Mute** - Mute alerts for this finding (1 hour)
+3. **🔄 Re-verify** - Trigger re-verification
+
+**Check Alert Status:**
+```bash
+curl "http://localhost:8000/api/slack/actions/status?findingId=test-123"
+```
+
+### Re-verify Endpoints
+
+Re-verify a finding with TTL and rate limiting enforced.
+
+**Required Header:**
+```
+Idempotency-Key: unique-key-123
+```
+
+**TTL Protection (120 seconds):**
+```bash
+# First request (accepted)
+curl -X POST http://localhost:8000/api/findings/abc-123/reverify \
+  -H "Idempotency-Key: key-001"
+
+# Response: { "id": "abc-123", "reverifyStatus": "accepted" }
+
+# Second request within 120s (duplicate)
+curl -X POST http://localhost:8000/api/findings/abc-123/reverify \
+  -H "Idempotency-Key: key-001"
+
+# Response: { "id": "abc-123", "reverifyStatus": "duplicate_ttl" }
+```
+
+**Rate Limiting (5 requests/hour per finding):**
+```bash
+# 6th request within 1 hour (rate limited)
+curl -X POST http://localhost:8000/api/findings/abc-123/reverify \
+  -H "Idempotency-Key: key-006"
+
+# Response (429): { "id": "abc-123", "reverifyStatus": "rate_limited" }
+```
+
+### Observability
+
+**Prometheus Metrics:**
+```bash
+curl http://localhost:8000/metrics
+```
+
+**Available Metrics:**
+- `unleak_runs_created_total` - Total runs created
+- `unleak_http_response_status_total` - HTTP status code counts
+- `unleak_http_request_duration_ms` - Request latency histogram
+- `unleak_breaker_state_changes_total` - Circuit breaker state transitions
+- `unleak_breaker_requests_blocked_total` - Requests blocked by breaker
+- `unleak_slack_alerts_sent_total` - Slack alerts sent
+- `unleak_reverify_requests_total` - Re-verify request counts
+- `unleak_active_runs` - Current active runs (gauge)
+- `unleak_breaker_state` - Breaker states (0=closed, 1=half_open, 2=open)
+
+### Testing Circuit Breaker
+
+**Trigger Failures:**
+```bash
+# Test 5xx errors
+curl -X POST http://localhost:8000/api/runs \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["http://httpbin.org/status/500"]}'
+
+# Test high latency
+curl -X POST http://localhost:8000/api/runs \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["http://httpbin.org/delay/3"]}'
+```
+
+**Verify Breaker Opens:**
+```bash
+# Check breaker state
+curl http://localhost:8000/api/admin/breaker
+
+# Try another request (should be blocked)
+curl -X POST http://localhost:8000/api/runs \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["http://httpbin.org/status/500"]}'
+```
+
+### Testing Slack Alerts
+
+**Quick Test:**
+```bash
+npm run test:slack
+```
+
+This will trigger 4 types of alerts:
+1. 5xx server error
+2. High latency (>1500ms)
+3. Request timeout
+4. Network error
+
+**Expected Output:**
+```
+[INFO] [Slack] Alert sent successfully { findingId: 'xxx', errorType: '5xx', ... }
+[INFO] [Slack] Alert sent successfully { findingId: 'yyy', errorType: 'latency', ... }
+[INFO] [Slack] Alert sent successfully { findingId: 'zzz', errorType: 'timeout', ... }
+[INFO] [Slack] Alert sent successfully { findingId: 'aaa', errorType: 'network', ... }
+```
+
+**Troubleshooting:**
+- If no alerts are sent, see [SLACK_ALERTS_TROUBLESHOOTING.md](./SLACK_ALERTS_TROUBLESHOOTING.md)
+- Ensure `BREAKER_ENABLED=true` and `SLACK_WEBHOOK_URL` is set in `.env`
+- Alerts only work when fetcher is used with `targetId` parameter
 
 ---
 
 ## Available Scripts
 
 ```bash
-# Development
-npm run dev              # Start development server with auto-reload
+# Development - All Services
+npm run dev              # Start API server + Scan worker + Render worker (recommended)
+
+# Development - Individual Services
+npm run dev:api          # Start API server only
+npm run dev:scan         # Start scan worker only
+npm run dev:render       # Start render worker only
+
+# Workers (without auto-reload)
+npm run worker:scan      # Start scan worker
+npm run worker:render    # Start render worker
+npm run worker:all       # Start both workers
 
 # Building
 npm run build            # Compile TypeScript to JavaScript
@@ -266,12 +499,16 @@ npm run test             # Run Jest tests
 npm run test:watch       # Run Jest in watch mode
 npm run test:fetcher     # Test Fetcher service
 npm run test:runs-api    # Test API endpoints
+npm run test:slack       # Test Slack alerts integration
 
 # Code Quality
 npm run lint             # Run ESLint
 npm run lint:fix         # Fix ESLint errors
 npm run format           # Format code with Prettier
 npm run format:check     # Check code formatting
+
+# Setup
+npm run setup            # Install dependencies + Playwright browsers
 ```
 
 ---
