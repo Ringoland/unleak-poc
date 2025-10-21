@@ -54,8 +54,8 @@ async function startServer() {
       const redis = getRedisClient();
       initializeBreakerService(redis, {
         failThreshold: 3,
-        openDurationMs: 20 * 60 * 1000, // 20 minutes
-        halfOpenProbeDelayMs: 40 * 60 * 1000, // 40 minutes (exponential backoff)
+        openDurationMs: config.circuitBreaker.openMinutes * 60 * 1000, // 20 min
+        halfOpenProbeDelayMs: config.circuitBreaker.openMinutes * 2 * 60 * 1000, // openDuration × 2 → 40 min
         failureWindowSize: config.circuitBreaker.errorRateWindow,
         failureRateThreshold: config.circuitBreaker.errorRateThresholdPct / 100,
       });
