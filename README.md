@@ -1,6 +1,12 @@
 # Unleak PoC
 
-**Day 1 Implementation:** Database schema (ERD), Postgres migrations, Fetcher interface with Direct HTTP adapter, and database-connected API endpoints.
+**Implementation Status:**
+- ✅ **Day 1:** Database schema (ERD), Postgres migrations, Fetcher interface, API endpoints
+- ✅ **Day 2:** Queue system (BullMQ), workers (scan, render), job orchestration
+- ✅ **Day 3:** Circuit breaker, Slack alerts, Re-verify with TTL/rate limiting
+- ✅ **Day 4:** Rules engine, fingerprinting, deduplication, cooldowns, maintenance windows, robots.txt, allow-list
+
+For detailed Day-4 documentation, see [DAY4_IMPLEMENTATION.md](./DAY4_IMPLEMENTATION.md).
 
 ---
 
@@ -465,6 +471,108 @@ This will trigger 4 types of alerts:
 - If no alerts are sent, see [SLACK_ALERTS_TROUBLESHOOTING.md](./SLACK_ALERTS_TROUBLESHOOTING.md)
 - Ensure `BREAKER_ENABLED=true` and `SLACK_WEBHOOK_URL` is set in `.env`
 - Alerts only work when fetcher is used with `targetId` parameter
+
+---
+
+## Day-4: Rules Engine & Smart Suppression
+
+Day-4 adds intelligent finding management to reduce alert noise and improve operational efficiency.
+
+### Key Features
+
+🔍 **Fingerprinting**: SHA256-based finding identification with URL/error normalization  
+🔁 **Deduplication**: Automatic tracking of duplicate findings with occurrence counts  
+⏱️ **Cooldown Management**: Per-finding cooldown periods (default: 15 min)  
+🛠️ **Maintenance Windows**: Suppress alerts during scheduled maintenance  
+🤖 **Robots.txt Respect**: Honor robots.txt directives (cached 10 min)  
+✅ **Allow-list**: Wildcard-based URL filtering before scanning  
+📊 **Enhanced Metrics**: Suppression counters by reason, deduplication tracking  
+
+### Quick Setup
+
+1. **Create configuration files:**
+
+```bash
+# Rules configuration
+cat > src/config/rules.json << EOF
+{
+  "defaults": {
+    "cooldownSeconds": 900,
+    "latencyMsThreshold": 1500,
+    "respectRobots": true,
+    "suppressDuringMaintenance": true
+  },
+  "rules": [
+    {
+      "id": "default-web",
+      "pattern": ".*",
+      "cooldownSeconds": 900,
+      "latencyMsThreshold": 1500,
+      "respectRobots": true
+    }
+  ]
+}
+EOF
+
+# Allow-list (start empty to allow all)
+touch src/config/allow-list.csv
+```
+
+2. **Add to `.env`:**
+
+```bash
+RULES_FILE=src/config/rules.json
+ALLOW_LIST_FILE=src/config/allow-list.csv
+```
+
+3. **Restart server** - Rules engine loads automatically
+
+### Admin Endpoints
+
+```bash
+# View rules engine status
+curl http://localhost:8000/api/admin/rules | jq
+
+# Get all fingerprints with details
+curl http://localhost:8000/api/admin/rules/fingerprints | jq
+
+# Reload allow-list without restart
+curl -X POST http://localhost:8000/api/admin/rules/reload-allowlist
+
+# Clear robots.txt cache
+curl -X DELETE "http://localhost:8000/api/admin/rules/robots-cache?domain=example.com"
+```
+
+### New Metrics
+
+```promql
+# Findings suppressed by reason (cooldown, maintenance, robots, allowlist)
+unleak_findings_suppressed_total{reason="..."}
+
+# Fingerprint deduplication events (new vs updated)
+unleak_fingerprint_deduplication_total{action="new|updated"}
+```
+
+### Documentation
+
+📖 **Complete Day-4 Documentation**: [DAY4_IMPLEMENTATION.md](./DAY4_IMPLEMENTATION.md)  
+✅ **Verification Checklist**: [DAY4_CHECKLIST.md](./DAY4_CHECKLIST.md)  
+
+**Key Concepts:**
+
+- **Fingerprinting**: URLs normalized (no query/fragments), errors normalized (no timestamps/IDs)
+- **Deduplication**: First occurrence alerts, duplicates suppressed until cooldown expires
+- **Allow-list**: Supports wildcards (`*.example.com`, `https://api.safe.com/*`)
+- **Robots.txt**: Fetched per domain, cached 10 min, honors Disallow/Allow directives
+- **Maintenance Windows**: UTC-based, multiple windows per rule supported
+
+---
+
+## Available Scripts
+
+```bash
+# Development - All Services
+````
 
 ---
 

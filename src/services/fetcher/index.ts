@@ -14,6 +14,8 @@ import { config } from '../../config';
 import { sendSlackAlert } from '../slackService';
 import { nanoid } from 'nanoid';
 import { recordHttpRequest, recordBlockedRequest } from '../../utils/metrics';
+import { getRedisClient } from '../../config/redis';
+import { checkSuppression, shouldAlertLatency } from '../rulesEngine';
 
 export type FetcherAdapter = 'direct' | 'zenrows';
 
@@ -74,7 +76,7 @@ export class BreakerAwareFetcher implements IFetcher {
     url?: string
   ): Promise<FetchResult> {
     const startTime = performance.now();
-    const LATENCY_THRESHOLD_MS = 1500; // Alert if latency > 1500ms
+    const redis = getRedisClient();
 
     try {
       const result = await fetchFn();
@@ -91,39 +93,75 @@ export class BreakerAwareFetcher implements IFetcher {
         await this.breaker.recordSuccess(targetId);
         logger.debug(`[breaker] Success recorded for target ${targetId}`);
 
-        // Check for high latency even on success
-        if (latencyMs > LATENCY_THRESHOLD_MS) {
+        // Check for high latency even on success (using rule-based threshold)
+        if (url && shouldAlertLatency(url, latencyMs)) {
           logger.warn(`[breaker] High latency detected for ${targetId}: ${latencyMs}ms`);
           
-          // Send Slack alert for high latency (non-blocking)
-          sendSlackAlert({
-            findingId: nanoid(),
-            url: url || targetId,
-            errorType: 'latency',
-            latencyMs,
-            status: result.status,
-            timestamp: new Date(),
-          }).catch((err) => {
-            logger.error('[breaker] Failed to send latency Slack alert', err);
-          });
+          // Check suppression via rules engine
+          const suppression = await checkSuppression(
+            redis,
+            url,
+            'latency',
+            result.status,
+            undefined,
+            latencyMs
+          );
+
+          if (!suppression.suppressed) {
+            // Send Slack alert for high latency (non-blocking)
+            sendSlackAlert({
+              findingId: nanoid(),
+              url,
+              errorType: 'latency',
+              latencyMs,
+              status: result.status,
+              timestamp: new Date(),
+              fingerprint: suppression.fingerprint,
+            }).catch((err) => {
+              logger.error('[breaker] Failed to send latency Slack alert', err);
+            });
+          } else {
+            logger.debug(
+              `[breaker] Latency alert suppressed for ${url} (reason: ${suppression.reason})`
+            );
+          }
         }
       } else if (result.status && result.status >= 500) {
         // 5xx errors are server failures
         await this.breaker.recordFailure(targetId, `HTTP_${result.status}`);
         logger.warn(`[breaker] Failure recorded for target ${targetId} (HTTP ${result.status})`);
 
-        // Send Slack alert for 5xx error (non-blocking)
-        sendSlackAlert({
-          findingId: nanoid(),
-          url: url || targetId,
-          errorType: '5xx',
-          latencyMs,
-          status: result.status,
-          error: result.error,
-          timestamp: new Date(),
-        }).catch((err) => {
-          logger.error('[breaker] Failed to send 5xx Slack alert', err);
-        });
+        // Check suppression via rules engine
+        if (url) {
+          const suppression = await checkSuppression(
+            redis,
+            url,
+            '5xx',
+            result.status,
+            result.error,
+            latencyMs
+          );
+
+          if (!suppression.suppressed) {
+            // Send Slack alert for 5xx error (non-blocking)
+            sendSlackAlert({
+              findingId: nanoid(),
+              url,
+              errorType: '5xx',
+              latencyMs,
+              status: result.status,
+              error: result.error,
+              timestamp: new Date(),
+              fingerprint: suppression.fingerprint,
+            }).catch((err) => {
+              logger.error('[breaker] Failed to send 5xx Slack alert', err);
+            });
+          } else {
+            logger.debug(
+              `[breaker] 5xx alert suppressed for ${url} (reason: ${suppression.reason})`
+            );
+          }
+        }
       } else if (!result.success && result.error) {
         // Network errors, timeouts, etc.
         await this.breaker.recordFailure(targetId, result.error);
@@ -133,17 +171,36 @@ export class BreakerAwareFetcher implements IFetcher {
         const isTimeout = result.error.toLowerCase().includes('timeout');
         const errorType = isTimeout ? 'timeout' : 'network';
 
-        // Send Slack alert for network/timeout error (non-blocking)
-        sendSlackAlert({
-          findingId: nanoid(),
-          url: url || targetId,
-          errorType,
-          latencyMs,
-          error: result.error,
-          timestamp: new Date(),
-        }).catch((err) => {
-          logger.error('[breaker] Failed to send network Slack alert', err);
-        });
+        // Check suppression via rules engine
+        if (url) {
+          const suppression = await checkSuppression(
+            redis,
+            url,
+            errorType,
+            undefined,
+            result.error,
+            latencyMs
+          );
+
+          if (!suppression.suppressed) {
+            // Send Slack alert for network/timeout error (non-blocking)
+            sendSlackAlert({
+              findingId: nanoid(),
+              url,
+              errorType,
+              latencyMs,
+              error: result.error,
+              timestamp: new Date(),
+              fingerprint: suppression.fingerprint,
+            }).catch((err) => {
+              logger.error('[breaker] Failed to send network Slack alert', err);
+            });
+          } else {
+            logger.debug(
+              `[breaker] ${errorType} alert suppressed for ${url} (reason: ${suppression.reason})`
+            );
+          }
+        }
       }
 
       return result;
@@ -157,17 +214,36 @@ export class BreakerAwareFetcher implements IFetcher {
         `[breaker] Failure recorded for target ${targetId} (exception: ${errorMessage})`
       );
 
-      // Send Slack alert for exception (non-blocking)
-      sendSlackAlert({
-        findingId: nanoid(),
-        url: url || targetId,
-        errorType: 'network',
-        latencyMs,
-        error: errorMessage,
-        timestamp: new Date(),
-      }).catch((err) => {
-        logger.error('[breaker] Failed to send exception Slack alert', err);
-      });
+      // Check suppression via rules engine
+      if (url) {
+        const suppression = await checkSuppression(
+          redis,
+          url,
+          'network',
+          undefined,
+          errorMessage,
+          latencyMs
+        );
+
+        if (!suppression.suppressed) {
+          // Send Slack alert for exception (non-blocking)
+          sendSlackAlert({
+            findingId: nanoid(),
+            url,
+            errorType: 'network',
+            latencyMs,
+            error: errorMessage,
+            timestamp: new Date(),
+            fingerprint: suppression.fingerprint,
+          }).catch((err) => {
+            logger.error('[breaker] Failed to send exception Slack alert', err);
+          });
+        } else {
+          logger.debug(
+            `[breaker] Exception alert suppressed for ${url} (reason: ${suppression.reason})`
+          );
+        }
+      }
 
       return {
         success: false,

@@ -4,6 +4,7 @@ import { getBreakerService } from '../../services/breaker';
 import { db } from '../../db';
 import { runs } from '../../db/schema';
 import { desc } from 'drizzle-orm';
+import rulesRouter from './rules';
 
 const router: Router = Router();
 
@@ -145,5 +146,7 @@ router.post('/breaker/reset', async (req: Request, res: Response) => {
     });
   }
 });
+
+router.use('/rules', rulesRouter);
 
 export default router;

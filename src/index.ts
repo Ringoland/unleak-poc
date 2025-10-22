@@ -11,6 +11,8 @@ import { logger } from './utils/logger';
 import { getMetrics } from './utils/metrics';
 import { initializeBreakerService } from './services/breaker';
 import { initializeFetcher } from './services/fetcher';
+import { loadRulesConfig } from './services/rulesService';
+import { loadAllowList } from './services/allowListService';
 
 const app = express();
 const port = config.port;
@@ -48,6 +50,24 @@ async function startServer() {
     // Initialize Redis connection
     await initializeRedis();
     logger.info('Redis connected successfully');
+
+    // Load Day-4 rules engine configuration
+    try {
+      loadRulesConfig();
+      logger.info('Rules engine configuration loaded successfully');
+    } catch (error) {
+      logger.error('Failed to load rules configuration:', error);
+      // Continue without rules engine if config is missing
+    }
+
+    // Load Day-4 allow-list
+    try {
+      loadAllowList();
+      logger.info('Allow-list loaded successfully');
+    } catch (error) {
+      logger.error('Failed to load allow-list:', error);
+      // Continue without allow-list if file is missing
+    }
 
     // Initialize Circuit Breaker service (if enabled)
     if (config.circuitBreaker.enabled) {
