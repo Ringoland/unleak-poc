@@ -11,6 +11,7 @@ export interface SlackAlert {
   status?: number;
   error?: string;
   timestamp?: Date;
+  fingerprint?: string; // Day-4: Optional fingerprint for deduplication
 }
 
 interface SlackButton {
@@ -137,6 +138,14 @@ export async function sendSlackAlert(alert: SlackAlert): Promise<void> {
                   {
                     type: 'mrkdwn',
                     text: `*Status:*\n${alert.status}`,
+                  },
+                ]
+              : []),
+            ...(alert.fingerprint
+              ? [
+                  {
+                    type: 'mrkdwn',
+                    text: `*Fingerprint:*\n\`${alert.fingerprint.substring(0, 16)}...\``,
                   },
                 ]
               : []),

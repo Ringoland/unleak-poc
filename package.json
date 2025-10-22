@@ -15,7 +15,8 @@
     "start:legacy": "node server.cjs",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:evidence": "ts-node src/scripts/testEvidenceCapture.ts",
+    "test:evidence": "ts-node tests/testEvidenceCapture.ts",
+    "test:slack": "ts-node tests/testSlackAlerts.ts",
     "worker:scan": "ts-node src/scripts/startScanWorker.ts",
     "worker:render": "ts-node src/scripts/startRenderWorker.ts",
     "worker:all": "concurrently \"pnpm worker:scan\" \"pnpm worker:render\"",
@@ -27,8 +28,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio",
-    "test:slack": "ts-node src/scripts/testSlackAlerts.ts"
+    "db:studio": "drizzle-kit studio"
   },
   "keywords": [
     "typescript",

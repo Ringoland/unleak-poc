@@ -3,6 +3,10 @@ import { getRedisClient } from '../config/redis';
 import { browserService, type EvidenceCapture } from '../services/browserService';
 import { artifactService } from '../services/artifactService';
 import { storageService } from '../services/storageService';
+import { runService } from '../services/runService';
+import { db } from '../db';
+import { findings } from '../db/schema';
+import { eq } from 'drizzle-orm';
 import { logger } from '../utils/logger';
 
 export interface RenderJobData {
@@ -38,6 +42,17 @@ export function createRenderWorker() {
       logger.info(`Processing render job ${job.id} for URL: ${job.data.url}`);
 
       try {
+        // Update finding status to processing
+        await db
+          .update(findings)
+          .set({
+            status: 'processing',
+            updatedAt: new Date(),
+          })
+          .where(eq(findings.id, job.data.findingId));
+
+        logger.info(`Finding ${job.data.findingId} status updated to processing`);
+
         // Initialize storage if not already done
         await storageService.initialize();
 
@@ -118,6 +133,28 @@ export function createRenderWorker() {
 
         logger.info(`Saved ${savedArtifacts.length} artifacts for finding ${job.data.findingId}`);
 
+        // Update finding status to evidence_captured
+        const [finding] = await db
+          .update(findings)
+          .set({
+            status: 'evidence_captured',
+            updatedAt: new Date(),
+          })
+          .where(eq(findings.id, job.data.findingId))
+          .returning();
+
+        if (finding) {
+          logger.info(`Finding ${job.data.findingId} status updated to evidence_captured`);
+
+          // Check if all findings in the run are complete and update run status
+          if (finding.runId) {
+            const runUpdated = await runService.checkAndUpdateRunStatus(finding.runId);
+            if (runUpdated) {
+              logger.info(`Run ${finding.runId} marked as completed`);
+            }
+          }
+        }
+
         const result: RenderJobResult = {
           findingId: job.data.findingId,
           artifactIds: savedArtifacts.map((a) => a.id),
@@ -160,9 +197,34 @@ export function createRenderWorker() {
     );
   });
 
-  worker.on('failed', (job, err) => {
+  worker.on('failed', async (job, err) => {
     const attemptsLeft = job ? (job.attemptsMade || 0) : 0;
     logger.error(`Render job ${job?.id} failed (attempt ${attemptsLeft}):`, err);
+
+    // If this was the final attempt, mark finding as failed
+    if (job && job.attemptsMade >= (job.opts.attempts || 3)) {
+      try {
+        const [finding] = await db
+          .update(findings)
+          .set({
+            status: 'failed',
+            updatedAt: new Date(),
+          })
+          .where(eq(findings.id, job.data.findingId))
+          .returning();
+
+        if (finding) {
+          logger.info(`Finding ${job.data.findingId} marked as failed after all retries exhausted`);
+
+          // Check if all findings in the run are complete and update run status
+          if (finding.runId) {
+            await runService.checkAndUpdateRunStatus(finding.runId);
+          }
+        }
+      } catch (error) {
+        logger.error(`Failed to update finding status for ${job.data.findingId}:`, error);
+      }
+    }
   });
 
   worker.on('error', (err) => {

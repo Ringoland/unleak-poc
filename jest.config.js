@@ -11,4 +11,7 @@ module.exports = {
   ],
   coverageDirectory: 'coverage',
   verbose: true,
+  transformIgnorePatterns: [
+    'node_modules/(?!(nanoid)/)',
+  ],
 };

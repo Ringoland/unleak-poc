@@ -4,11 +4,6 @@ import { logger } from './logger';
 // Create a custom registry (or use the default one)
 export const metricsRegistry: Registry = defaultRegister;
 
-// ===== Counters =====
-
-/**
- * Total number of runs created
- */
 export const runsCreatedCounter = new Counter({
   name: 'unleak_runs_created_total',
   help: 'Total number of scan runs created',
@@ -73,6 +68,26 @@ export const findingsCreatedCounter = new Counter({
   name: 'unleak_findings_created_total',
   help: 'Total number of findings created',
   labelNames: ['severity', 'findingType'],
+  registers: [metricsRegistry],
+});
+
+/**
+ * Findings suppressed (Day-4)
+ */
+export const findingsSuppressedCounter = new Counter({
+  name: 'unleak_findings_suppressed_total',
+  help: 'Total number of findings suppressed by rules engine',
+  labelNames: ['reason'], // 'cooldown', 'maintenance', 'robots', 'allowlist'
+  registers: [metricsRegistry],
+});
+
+/**
+ * Fingerprint deduplication events (Day-4)
+ */
+export const fingerprintDeduplicationCounter = new Counter({
+  name: 'unleak_fingerprint_deduplication_total',
+  help: 'Total number of fingerprint deduplication events',
+  labelNames: ['action'], // 'new', 'updated'
   registers: [metricsRegistry],
 });
 
@@ -236,6 +251,28 @@ export function recordFindingCreated(severity: string, findingType: string): voi
     findingsCreatedCounter.labels(severity, findingType).inc();
   } catch (error) {
     logger.error('[Metrics] Error recording finding created', { error });
+  }
+}
+
+/**
+ * Record a finding suppressed (Day-4)
+ */
+export function recordFindingSuppressed(reason: string): void {
+  try {
+    findingsSuppressedCounter.labels(reason).inc();
+  } catch (error) {
+    logger.error('[Metrics] Error recording finding suppressed', { error });
+  }
+}
+
+/**
+ * Record a fingerprint deduplication event (Day-4)
+ */
+export function recordFingerprintDeduplication(action: 'new' | 'updated'): void {
+  try {
+    fingerprintDeduplicationCounter.labels(action).inc();
+  } catch (error) {
+    logger.error('[Metrics] Error recording fingerprint deduplication', { error });
   }
 }
 

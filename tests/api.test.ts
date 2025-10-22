@@ -3,12 +3,67 @@ import express, { Express } from 'express';
 import Redis from 'ioredis';
 import apiRoutes from '../src/api/index';
 import { errorHandler } from '../src/api/middleware/errorHandler';
-import { db } from '../src/db';
+import { runService } from '../src/services/runService';
 
-// Mock dependencies
-jest.mock('../src/config/redis');
+// Mock dependencies - MUST be before imports
+jest.mock('../src/config/redis', () => ({
+  initializeRedis: jest.fn().mockResolvedValue({
+    get: jest.fn(),
+    setex: jest.fn(),
+    incr: jest.fn(),
+    expire: jest.fn(),
+    quit: jest.fn(),
+    on: jest.fn(),
+  }),
+  getRedisClient: jest.fn().mockReturnValue({
+    get: jest.fn(),
+    setex: jest.fn(),
+    incr: jest.fn(),
+    expire: jest.fn(),
+    quit: jest.fn(),
+    on: jest.fn(),
+  }),
+  closeRedis: jest.fn().mockResolvedValue(undefined),
+}));
+
 jest.mock('../src/db');
 jest.mock('../src/utils/logger');
+
+jest.mock('nanoid', () => ({
+  nanoid: () => 'test-id-123',
+}));
+
+jest.mock('../src/services/queueService', () => ({
+  addRenderJob: jest.fn().mockResolvedValue({ id: 'job-123' }),
+  addScanJob: jest.fn().mockResolvedValue({ id: 'job-456' }),
+  renderQueue: {
+    add: jest.fn().mockResolvedValue({ id: 'job-123' }),
+    close: jest.fn(),
+    on: jest.fn(),
+  },
+  scanQueue: {
+    add: jest.fn().mockResolvedValue({ id: 'job-456' }),
+    close: jest.fn(),
+    on: jest.fn(),
+  },
+}));
+
+jest.mock('../src/services/runService');
+
+jest.mock('../src/utils/allow-list', () => ({
+  loadAllowList: jest.fn().mockReturnValue(['https://example.com', 'https://test.com']),
+}));
+
+jest.mock('../src/config/bullBoard', () => ({
+  serverAdapter: {
+    setBasePath: jest.fn(),
+    getRouter: jest.fn().mockReturnValue({
+      get: jest.fn(),
+      post: jest.fn(),
+      use: jest.fn(),
+    }),
+  },
+}));
 
 describe('API Integration Tests', () => {
   let app: Express;
@@ -32,24 +87,29 @@ describe('API Integration Tests', () => {
       setex: jest.fn(),
       incr: jest.fn(),
       expire: jest.fn(),
+      ttl: jest.fn(),
     } as any;
+    
+    // Ensure getRedisClient returns mockRedis
+    const { getRedisClient } = require('../src/config/redis');
+    getRedisClient.mockReturnValue(mockRedis);
   });
 
   describe('POST /api/runs', () => {
     it('should create a new run successfully', async () => {
-      const mockRun = {
-        id: 'run-123',
-        status: 'queued',
-        urlCount: 5,
-        submittedAt: new Date(),
-        runType: 'manual',
+      const mockResult = {
+        run: {
+          id: 'run-123',
+          status: 'queued',
+          urlCount: 2,
+          submittedAt: new Date(),
+          runType: 'manual',
+        },
+        findings: [{ id: 'finding-1' }, { id: 'finding-2' }],
+        jobIds: ['job-1', 'job-2'],
       };
 
-      (db.insert as jest.Mock) = jest.fn().mockReturnValue({
-        values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([mockRun]),
-        }),
-      });
+      (runService.createRun as jest.Mock).mockResolvedValueOnce(mockResult);
 
       const response = await request(app)
         .post('/api/runs')
@@ -61,60 +121,46 @@ describe('API Integration Tests', () => {
       expect(response.body).toMatchObject({
         id: 'run-123',
         submitted: expect.any(String),
-        count: 50,
+        count: 2,
+      });
+      
+      expect(runService.createRun).toHaveBeenCalledWith({
+        urls: ['https://example.com', 'https://test.com'],
+        payload: { custom: 'data' },
+        runType: 'manual',
       });
     });
 
     it('should handle empty URLs array', async () => {
-      const mockRun = {
-        id: 'run-124',
-        status: 'queued',
-        urlCount: 0,
-        submittedAt: new Date(),
-        runType: 'manual',
-      };
+      // Mock loadAllowList to return empty array
+      const { loadAllowList } = require('../src/utils/allow-list');
+      loadAllowList.mockReturnValueOnce([]);
 
-      (db.insert as jest.Mock) = jest.fn().mockReturnValue({
-        values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([mockRun]),
-        }),
-      });
+      const response = await request(app).post('/api/runs').send({ urls: [] }).expect(400);
 
-      const response = await request(app).post('/api/runs').send({ urls: [] }).expect(201);
-
-      expect(response.body.count).toBe(0);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toBe('No URLs provided');
     });
 
     it('should handle missing URLs field', async () => {
-      const mockRun = {
-        id: 'run-125',
-        status: 'queued',
-        urlCount: 0,
-        submittedAt: new Date(),
-        runType: 'manual',
-      };
+      // Mock loadAllowList to return empty array
+      const { loadAllowList } = require('../src/utils/allow-list');
+      loadAllowList.mockReturnValueOnce([]);
 
-      (db.insert as jest.Mock) = jest.fn().mockReturnValue({
-        values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([mockRun]),
-        }),
-      });
+      const response = await request(app).post('/api/runs').send({}).expect(400);
 
-      const response = await request(app).post('/api/runs').send({}).expect(201);
-
-      expect(response.body.count).toBe(0);
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toBe('No URLs provided');
     });
 
     it('should handle database errors', async () => {
-      (db.insert as jest.Mock) = jest.fn().mockReturnValue({
-        values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockRejectedValue(new Error('Database connection failed')),
-        }),
-      });
+      (runService.createRun as jest.Mock).mockRejectedValueOnce(
+        new Error('Database connection failed')
+      );
 
       const response = await request(app)
         .post('/api/runs')
-        .send({ urls: ['https://example.com'] })
+        .send({ payload: { test: 'data' } })
         .expect(500);
 
       expect(response.body).toHaveProperty('error');
@@ -137,15 +183,19 @@ describe('API Integration Tests', () => {
         error: null,
         createdAt: new Date('2025-10-16T10:00:00Z'),
         updatedAt: new Date('2025-10-16T10:15:00Z'),
+        findings: [
+          { id: 'f1', url: 'https://example.com', status: 'open', findingType: 'error', severity: 'high', title: 'Error 1', verified: false, falsePositive: false, createdAt: new Date() }
+        ]
       };
 
-      (db.select as jest.Mock) = jest.fn().mockReturnValue({
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockReturnValue({
-            limit: jest.fn().mockResolvedValue([mockRun]),
-          }),
-        }),
-      });
+      const mockStats = {
+        totalFindings: 3,
+        byStatus: { open: 2, resolved: 1 },
+        bySeverity: { high: 1, medium: 1, low: 1 },
+      };
+
+      (runService.getRun as jest.Mock).mockResolvedValueOnce(mockRun);
+      (runService.getRunStats as jest.Mock).mockResolvedValueOnce(mockStats);
 
       const response = await request(app).get('/api/runs/run-123').expect(200);
 
@@ -155,16 +205,13 @@ describe('API Integration Tests', () => {
         urlCount: 10,
         findingCount: 3,
       });
+      
+      expect(runService.getRun).toHaveBeenCalledWith('run-123');
+      expect(runService.getRunStats).toHaveBeenCalledWith('run-123');
     });
 
     it('should return 404 for non-existent run', async () => {
-      (db.select as jest.Mock) = jest.fn().mockReturnValue({
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockReturnValue({
-            limit: jest.fn().mockResolvedValue([]),
-          }),
-        }),
-      });
+      (runService.getRun as jest.Mock).mockResolvedValueOnce(null);
 
       const response = await request(app).get('/api/runs/non-existent-id').expect(404);
 
@@ -173,13 +220,9 @@ describe('API Integration Tests', () => {
     });
 
     it('should handle database errors', async () => {
-      (db.select as jest.Mock) = jest.fn().mockReturnValue({
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockReturnValue({
-            limit: jest.fn().mockRejectedValue(new Error('Database query failed')),
-          }),
-        }),
-      });
+      (runService.getRun as jest.Mock).mockRejectedValueOnce(
+        new Error('Database query failed')
+      );
 
       const response = await request(app).get('/api/runs/run-123').expect(500);
 
@@ -224,6 +267,7 @@ describe('API Integration Tests', () => {
 
     it('should detect duplicate requests using idempotency key', async () => {
       mockRedis.get.mockResolvedValue('finding-123');
+      mockRedis.ttl.mockResolvedValue(100);
 
       const response = await request(app)
         .post('/api/findings/finding-123/reverify')
@@ -295,34 +339,44 @@ describe('API Integration Tests', () => {
   });
 
   describe('POST /api/slack/actions', () => {
+    beforeEach(() => {
+      mockRedis.setex.mockResolvedValue('OK');
+    });
+
     it('should handle Slack action requests', async () => {
       const response = await request(app)
-        .post('/api/slack/actions')
-        .send({
-          type: 'block_actions',
-          actions: [{ action_id: 'test_action' }],
-        })
+        .post('/api/slack/actions?act=ack&findingId=finding-123')
         .expect(200);
 
       expect(response.body).toMatchObject({
         ok: true,
+        action: 'ack',
+        findingId: 'finding-123',
       });
+      
+      expect(mockRedis.setex).toHaveBeenCalledWith(
+        'slack:ack:finding-123',
+        86400,
+        expect.any(String)
+      );
     });
 
     it('should handle empty Slack action requests', async () => {
-      const response = await request(app).post('/api/slack/actions').send({}).expect(200);
+      const response = await request(app)
+        .post('/api/slack/actions')
+        .expect(400);
 
-      expect(response.body).toMatchObject({
-        ok: true,
-      });
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toBe('Missing required query parameters');
     });
 
     it('should handle Slack action requests with no body', async () => {
-      const res = await request(app).post('/api/slack/actions').expect(200);
+      const response = await request(app)
+        .post('/api/slack/actions')
+        .expect(400);
 
-      expect(res.body).toMatchObject({
-        ok: true,
-      });
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error).toBe('Missing required query parameters');
     });
   });
 
@@ -346,27 +400,28 @@ describe('API Integration Tests', () => {
 
   describe('Content-Type Validation', () => {
     it('should accept application/json content type', async () => {
-      const mockRun = {
-        id: 'run-126',
-        status: 'queued',
-        urlCount: 1,
-        submittedAt: new Date(),
-        runType: 'manual',
+      const mockResult = {
+        run: {
+          id: 'run-126',
+          status: 'queued',
+          urlCount: 2,
+          submittedAt: new Date(),
+          runType: 'manual',
+        },
+        findings: [{ id: 'finding-1' }, { id: 'finding-2' }],
+        jobIds: ['job-1', 'job-2'],
       };
 
-      (db.insert as jest.Mock) = jest.fn().mockReturnValue({
-        values: jest.fn().mockReturnValue({
-          returning: jest.fn().mockResolvedValue([mockRun]),
-        }),
-      });
+      (runService.createRun as jest.Mock).mockResolvedValueOnce(mockResult);
 
       const response = await request(app)
         .post('/api/runs')
         .set('Content-Type', 'application/json')
-        .send({ urls: ['https://example.com'] })
+        .send({ payload: { test: 'data' } })
         .expect(201);
 
       expect(response.body).toHaveProperty('id');
+      expect(response.body.id).toBe('run-126');
     });
   });
 
