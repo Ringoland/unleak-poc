@@ -72,36 +72,25 @@ async function createStabilityRun(): Promise<string> {
 
   logger.info(`Creating stability run with ${urls.length} URLs`);
 
-  // Create the run
-  const [run] = await db.insert(runs).values({
-    status: 'queued',
-    runType: 'stability-test',
-    urlCount: urls.length,
-    payload: { urls },
-    submittedAt: new Date(),
-  }).returning();
-
-  logger.info(`Created run ${run.id}`);
-
-  // Queue the URLs via API
+  // Create the run via API (proper contract)
   const axios = (await import('axios')).default;
-  const baseUrl = process.env.API_BASE_URL || 'http://localhost:3000';
+  const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
   
   try {
-    const response = await axios.post(`${baseUrl}/api/scan`, {
-      runId: run.id,
+    const response = await axios.post(`${baseUrl}/api/runs`, {
       urls,
     });
     
-    logger.info(`Queued ${urls.length} URLs for scanning`, { response: response.data });
+    const runId = response.data.id;
+    logger.info(`Created run ${runId} with ${urls.length} URLs`, { response: response.data });
+    
+    return runId;
   } catch (error) {
-    logger.error('Failed to queue URLs', {
+    logger.error('Failed to create run', {
       error: error instanceof Error ? error.message : String(error),
     });
     throw error;
   }
-
-  return run.id;
 }
 
 async function waitForRunCompletion(runId: string, timeoutMinutes: number = 30): Promise<void> {

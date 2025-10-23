@@ -134,7 +134,7 @@ pnpm dev
 ```
 
 Starts:
-- 🔵 **API Server** on `http://localhost:3000`
+- 🔵 **API Server** on `http://localhost:8000`
 - 🟢 **Scan Worker** - Processes URL scanning
 - 🟡 **Render Worker** - Captures evidence with Playwright
 
@@ -167,14 +167,14 @@ pnpm worker:render
 **Test the API:**
 ```bash
 # Health check
-curl http://localhost:3000/health
+curl http://localhost:8000/health
 
 # Expected: {"status":"ok","timestamp":"..."}
 ```
 
 **Create a test run:**
 ```bash
-curl -X POST http://localhost:3000/api/scan \
+curl -X POST http://localhost:8000/api/scan \
   -H "Content-Type: application/json" \
   -d '{"urls": ["https://example.com"]}'
 
@@ -183,13 +183,13 @@ curl -X POST http://localhost:3000/api/scan \
 
 **View queue dashboard:**
 ```
-Open: http://localhost:3000/admin/queues
+Open: http://localhost:8000/admin/queues
 Login: admin / admin (change in .env)
 ```
 
 **View Prometheus metrics:**
 ```
-Open: http://localhost:3000/metrics
+Open: http://localhost:8000/metrics
 ```
 
 ---
@@ -270,7 +270,7 @@ docker ps
 docker logs redis-unleak
 ```
 
-### Issue: Port 3000 already in use
+### Issue: Port 8000 already in use
 **Solution:**
 ```bash
 # Change port in .env
@@ -278,10 +278,10 @@ PORT=8000
 
 # Or kill existing process:
 # macOS/Linux:
-lsof -ti:3000 | xargs kill -9
+lsof -ti:8000 | xargs kill -9
 
 # Windows:
-netstat -ano | findstr :3000
+netstat -ano | findstr :8000
 taskkill /PID <PID> /F
 ```
 
@@ -300,7 +300,7 @@ pnpm db:push
 **Solution:**
 ```bash
 # View queue dashboard
-Open: http://localhost:3000/admin/queues
+Open: http://localhost:8000/admin/queues
 
 # Clean stuck jobs
 redis-cli FLUSHDB  # WARNING: Clears all Redis data
