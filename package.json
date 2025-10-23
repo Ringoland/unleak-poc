@@ -25,6 +25,8 @@
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
     "smoke:win": "powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1",
+    "stability": "ts-node src/scripts/runStabilityTest.ts",
+    "report:last": "ts-node src/scripts/reportLast.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -49,6 +51,7 @@
     "csv-parse": "^6.1.0",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.44.6",
+    "ejs": "^3.1.10",
     "express": "^5.1.0",
     "ioredis": "^5.4.2",
     "morgan": "^1.10.1",
@@ -58,6 +61,7 @@
     "prom-client": "^15.1.3"
   },
   "devDependencies": {
+    "@types/ejs": "^3.1.5",
     "@types/express": "^5.0.3",
     "@types/jest": "^30.0.0",
     "@types/morgan": "^1.9.10",

@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { createScanWorker } from '../workers/scanWorker';
 import { initializeRedis } from '../config/redis';
+import { loadRulesConfig } from '../services/rulesService';
+import { loadAllowList } from '../services/allowListService';
 import { logger } from '../utils/logger';
 
 async function main() {
@@ -10,6 +12,24 @@ async function main() {
     // Initialize Redis
     await initializeRedis();
     logger.info('Redis connected');
+
+    // Load rules configuration
+    try {
+      loadRulesConfig();
+      logger.info('Rules engine configuration loaded successfully');
+    } catch (error) {
+      logger.error('Failed to load rules configuration:', error);
+      logger.warn('Scan worker will continue without rules engine');
+    }
+
+    // Load allow-list
+    try {
+      loadAllowList();
+      logger.info('Allow-list loaded successfully');
+    } catch (error) {
+      logger.error('Failed to load allow-list:', error);
+      logger.warn('Scan worker will continue without allow-list');
+    }
 
     // Create and start the scan worker
     const worker = createScanWorker();

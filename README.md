@@ -5,6 +5,7 @@
 - ✅ **Day 2:** Queue system (BullMQ), workers (scan, render), job orchestration
 - ✅ **Day 3:** Circuit breaker, Slack alerts, Re-verify with TTL/rate limiting
 - ✅ **Day 4:** Rules engine, fingerprinting, deduplication, cooldowns, maintenance windows, robots.txt, allow-list
+- ✅ **Day 5:** Prometheus metrics, HTML admin panels, stability testing, repo hygiene
 
 For detailed Day-4 documentation, see [DAY4_IMPLEMENTATION.md](./DAY4_IMPLEMENTATION.md).
 
@@ -12,121 +13,303 @@ For detailed Day-4 documentation, see [DAY4_IMPLEMENTATION.md](./DAY4_IMPLEMENTA
 
 ## Quick Start
 
+### Prerequisites
+
+Before starting, ensure you have:
+- **Node.js** v18+ ([Download](https://nodejs.org/))
+- **pnpm** v8+ (install: `npm install -g pnpm`)
+- **PostgreSQL** v14+ ([Download](https://www.postgresql.org/download/))
+- **Docker** (for Redis) ([Download](https://www.docker.com/products/docker-desktop/))
+
 ### 1. Install Dependencies
 
 ```bash
-npm install
-# or
+# Install Node packages and Playwright browsers
 pnpm install
+
+# Or if postinstall fails, run separately:
+pnpm install
+npx playwright install chromium
 ```
 
-### 2. Create PostgreSQL Database
+### 2. Setup PostgreSQL
 
-Create a new database in PostgreSQL:
+**macOS (Homebrew):**
+```bash
+# Install PostgreSQL
+brew install postgresql@14
+brew services start postgresql@14
 
-```sql
+# Create database
+createdb unleak_poc
+
+# Or using psql:
+psql postgres -c "CREATE DATABASE unleak_poc;"
+```
+
+**Windows:**
+```powershell
+# Download installer from: https://www.postgresql.org/download/windows/
+# After installation, open pgAdmin or psql and run:
 CREATE DATABASE unleak_poc;
 ```
 
-### 3. Configure Environment Variables
-
-Copy `.env.example` to `.env` and update the database credentials:
-
+**Docker (Cross-platform):**
 ```bash
-cp .env.example .env
+# Run PostgreSQL in Docker
+docker run -d \
+  --name postgres-unleak \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=unleak_poc \
+  -p 5432:5432 \
+  postgres:14
+
+# Verify it's running
+docker ps
 ```
 
-Edit `.env` and set your PostgreSQL connection details:
+### 3. Setup Redis
 
+**macOS (Homebrew):**
 ```bash
-# PostgreSQL Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=unleak_poc
-DB_USER=postgres
-DB_PASSWORD=your_password_here
-DB_SSL=false
+brew install redis
+brew services start redis
 ```
 
-### 4. Run Database Migrations
-
-Apply the database schema migrations:
-
-```bash
-npm run db:migrate
+**Windows (Docker):**
+```powershell
+docker run -d --name redis-unleak -p 6379:6379 redis:latest
 ```
 
-This will create all required tables: `runs`, `findings`, `breaker_states`, `reverify_keys`, and `reverify_counters`.
-
-### 5. Start Redis with Docker
-
-Run Redis in a Docker container:
-
+**Linux/macOS (Docker):**
 ```bash
-# Pull and run Redis
 docker run -d --name redis-unleak -p 6379:6379 redis:latest
 
 # Verify Redis is running
 docker ps
+redis-cli ping  # Should return PONG
 ```
 
-For more details on running Redis with Docker, see: [Redis Docker Official Image](https://hub.docker.com/_/redis)
-
-### 6. Start Development Server
-
-**Option 1: All-in-One (Recommended)**
-
-Start the API server and both workers together:
+### 4. Configure Environment
 
 ```bash
-npm run dev
-# or
+# Copy example config
+cp .env.example .env
+
+# Edit .env with your settings
+# Required: Update DB_PASSWORD if using non-default PostgreSQL setup
+```
+
+**Key environment variables:**
+```bash
+# Database (Required)
+DB_PASSWORD=postgres          # Your PostgreSQL password
+
+# Circuit Breaker (Recommended)
+BREAKER_ENABLED=true          # Enable failure protection
+
+# Slack (Optional)
+SLACK_WEBHOOK_URL=            # Add for alert notifications
+```
+
+See `.env.example` for all available configuration options.
+
+### 5. Run Database Migrations
+
+```bash
+# Apply schema migrations
+pnpm db:push
+
+# Or use Drizzle Kit migrate:
+pnpm db:migrate
+```
+
+This creates tables: `runs`, `findings`, `artifacts`
+
+### 6. Start the Application
+
+**Option 1: All-in-One (Recommended)**
+```bash
 pnpm dev
 ```
 
-This will start:
-- 🔵 **API Server** on `http://localhost:8000`
-- 🟢 **Scan Worker** - Processes URL scanning jobs
-- 🟡 **Render Worker** - Captures screenshots and evidence with Playwright
+Starts:
+- 🔵 **API Server** on `http://localhost:3000`
+- 🟢 **Scan Worker** - Processes URL scanning
+- 🟡 **Render Worker** - Captures evidence with Playwright
 
-**Option 2: Start Services Individually**
-
-If you need to run services separately (useful for debugging):
-
+**Option 2: Individual Services** (for debugging)
 ```bash
-# Terminal 1 - API Server only
-npm run dev:api
+# Terminal 1 - API only
+pnpm dev:api
 
-# Terminal 2 - Scan Worker only
-npm run dev:scan
+# Terminal 2 - Scan worker only
+pnpm dev:scan
 
-# Terminal 3 - Render Worker only
-npm run dev:render
+# Terminal 3 - Render worker only
+pnpm dev:render
 ```
 
-**Option 3: Workers Only**
-
-Run both workers without the API server:
-
+**Option 3: Production Build**
 ```bash
-npm run worker:all
-```
+pnpm build
+pnpm start
 
-> **Note**: The render worker requires Playwright browsers. These are automatically installed during `npm install` via the postinstall script. If you encounter browser-related errors, run: `npx playwright install chromium`
+# Start workers separately:
+pnpm worker:scan
+pnpm worker:render
+```
 
 ---
 
 ## Verify Installation
 
-Test that everything is working:
-
+**Test the API:**
 ```bash
-# Test the fetcher (Direct HTTP adapter)
-npm run test:fetcher
+# Health check
+curl http://localhost:3000/health
 
-# Test the API endpoints (requires server running)
-npm run test:runs-api
+# Expected: {"status":"ok","timestamp":"..."}
 ```
+
+**Create a test run:**
+```bash
+curl -X POST http://localhost:3000/api/scan \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["https://example.com"]}'
+
+# Expected: {"runId":"...","status":"queued","urls":1}
+```
+
+**View queue dashboard:**
+```
+Open: http://localhost:3000/admin/queues
+Login: admin / admin (change in .env)
+```
+
+**View Prometheus metrics:**
+```
+Open: http://localhost:3000/metrics
+```
+
+---
+
+## Docker Quickstart (All-in-One)
+
+Coming soon: `docker-compose.yml` with PostgreSQL, Redis, and Unleak PoC.
+
+For now, run dependencies with Docker:
+
+**docker-compose.yml:**
+```yaml
+version: '3.8'
+services:
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: unleak_poc
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres-data:
+```
+
+**Start dependencies:**
+```bash
+docker-compose up -d
+```
+
+Then run the app locally:
+```bash
+pnpm install
+pnpm db:push
+pnpm dev
+```
+
+---
+
+## Troubleshooting
+
+### Issue: Playwright browsers not installed
+**Solution:**
+```bash
+npx playwright install chromium
+```
+
+### Issue: PostgreSQL connection failed
+**Solution:**
+```bash
+# Check if PostgreSQL is running
+# macOS:
+brew services list
+
+# Windows/Docker:
+docker ps
+
+# Test connection
+psql -h localhost -U postgres -d unleak_poc
+```
+
+### Issue: Redis connection failed
+**Solution:**
+```bash
+# Test Redis connection
+redis-cli ping
+
+# If using Docker, check container:
+docker ps
+docker logs redis-unleak
+```
+
+### Issue: Port 3000 already in use
+**Solution:**
+```bash
+# Change port in .env
+PORT=8000
+
+# Or kill existing process:
+# macOS/Linux:
+lsof -ti:3000 | xargs kill -9
+
+# Windows:
+netstat -ano | findstr :3000
+taskkill /PID <PID> /F
+```
+
+### Issue: Database migrations fail
+**Solution:**
+```bash
+# Drop and recreate database
+dropdb unleak_poc
+createdb unleak_poc
+
+# Re-run migrations
+pnpm db:push
+```
+
+### Issue: Queue jobs stuck
+**Solution:**
+```bash
+# View queue dashboard
+Open: http://localhost:3000/admin/queues
+
+# Clean stuck jobs
+redis-cli FLUSHDB  # WARNING: Clears all Redis data
+
+# Or use the clean queue script:
+ts-node src/scripts/cleanQueue.ts
+```
+
+For more help, see individual test files in `tests/` directory or check logs in `artifacts/logs/`.
 
 ---
 
@@ -474,6 +657,98 @@ This will trigger 4 types of alerts:
 
 ---
 
+## Day-5: Stability Testing
+
+### Running the 50-URL Stability Exercise
+
+The stability test validates all Day-3 and Day-4 features working together with a comprehensive test suite of 50 URLs:
+- **30 OK URLs** - Return 200 status (httpstat.us, example.com, httpbin.org)
+- **10 FAIL URLs** - Return 5xx errors (500, 502, 503, 504)
+- **10 SLOW URLs** - Delayed responses (3-5 seconds)
+
+**Prerequisites:**
+1. Start the API server and workers:
+   ```bash
+   pnpm dev
+   ```
+
+2. Ensure PostgreSQL and Redis are running
+
+**Run the Test:**
+```bash
+pnpm stability
+```
+
+**What Gets Tested:**
+- ✅ **Retries** - Automatic retry logic for failed requests
+- ✅ **Circuit Breaker** - Trips on repeated failures, allows probe requests
+- ✅ **Rules Engine** - Matches URLs against configured rules
+- ✅ **Cooldowns** - Suppresses duplicate findings within cooldown period
+- ✅ **Maintenance Windows** - Respects scheduled maintenance periods
+- ✅ **robots.txt** - Validates URLs against robots.txt policies
+- ✅ **Allow-List** - Only processes allowed domains
+
+**Example Output:**
+```
+================================================================================
+📊 STABILITY TEST REPORT
+================================================================================
+
+🆔 Run ID: 123e4567-e89b-12d3-a456-426614174000
+⏱️  Duration: 45.23s
+📅 Timestamp: 2025-10-23T10:30:00.000Z
+
+📋 SUMMARY
+   Total URLs: 50
+   ✅ OK (200): 30 (60%)
+   ❌ FAIL (5xx): 10 (20%)
+   🐌 SLOW (delay): 10 (20%)
+
+🔍 FINDINGS
+   Total: 50
+   By Status:
+      evidence_captured: 42 (84%)
+      suppressed: 5 (10%)
+      failed: 3 (6%)
+   With Evidence: 42
+
+🚫 SUPPRESSED
+   Total: 5
+   By Reason:
+      Cooldown/Duplicate: 3
+      Maintenance Window: 1
+      robots.txt: 1
+      Allow-list: 0
+
+⚡ LATENCY
+   Average: 1250ms
+   P50: 800ms
+   P95: 3200ms
+   P99: 4800ms
+   Min: 120ms
+   Max: 5100ms
+
+🔌 CIRCUIT BREAKER
+   Trips Observed: 2
+   Hosts Affected: httpstat.us, httpbin.org
+
+================================================================================
+✅ Report Complete
+================================================================================
+```
+
+**Report Location:**
+The detailed JSON report is saved to `reports/stability-report-{timestamp}.json`
+
+**View Results:**
+After the test completes, view the run in your browser:
+```bash
+# Get the run ID from the test output, then:
+open http://localhost:8000/admin/runs/{runId}
+```
+
+---
+
 ## Day-4: Rules Engine & Smart Suppression
 
 Day-4 adds intelligent finding management to reduce alert noise and improve operational efficiency.
@@ -617,6 +892,60 @@ npm run format:check     # Check code formatting
 
 # Setup
 npm run setup            # Install dependencies + Playwright browsers
+```
+
+---
+
+## Prometheus Metrics (Day-5)
+
+The application exposes Prometheus metrics at `/metrics` endpoint.
+
+### Available Metrics
+
+| Metric | Type | Description | Labels |
+|--------|------|-------------|--------|
+| `unleak_runs_total` | Counter | Total scan runs by status | `status` |
+| `unleak_fetch_latency_ms` | Histogram | Fetch latency in milliseconds | `targetUrl` |
+| `unleak_status_code_total` | Counter | HTTP status codes encountered | `code` |
+| `unleak_breaker_state_changes_total` | Counter | Circuit breaker state transitions | `targetId`, `fromState`, `toState` |
+| `unleak_findings_created_total` | Counter | Total findings created | `severity`, `findingType` |
+| `unleak_findings_suppressed_total` | Counter | Findings suppressed by rules engine | `reason` (cooldown/maintenance/robots/allowlist) |
+
+### Scraping Locally
+
+**Using curl:**
+```bash
+curl http://localhost:8000/metrics
+```
+
+**Using Prometheus (prometheus.yml):**
+```yaml
+scrape_configs:
+  - job_name: 'unleak-poc'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['localhost:8000']
+```
+
+**Example output:**
+```
+# HELP unleak_runs_total Total number of scan runs by status
+# TYPE unleak_runs_total counter
+unleak_runs_total{status="completed"} 5
+unleak_runs_total{status="in_progress"} 2
+
+# HELP unleak_fetch_latency_ms Fetch latency in milliseconds
+# TYPE unleak_fetch_latency_ms histogram
+unleak_fetch_latency_ms_bucket{le="100",targetUrl="https://example.com"} 45
+unleak_fetch_latency_ms_bucket{le="500",targetUrl="https://example.com"} 87
+unleak_fetch_latency_ms_sum{targetUrl="https://example.com"} 12456.7
+unleak_fetch_latency_ms_count{targetUrl="https://example.com"} 100
+
+# HELP unleak_findings_suppressed_total Total number of findings suppressed by rules engine
+# TYPE unleak_findings_suppressed_total counter
+unleak_findings_suppressed_total{reason="cooldown"} 15
+unleak_findings_suppressed_total{reason="maintenance"} 8
+unleak_findings_suppressed_total{reason="robots"} 3
 ```
 
 ---

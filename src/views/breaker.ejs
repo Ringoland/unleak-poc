@@ -1,0 +1,78 @@
+<div class="header">
+  <h1>🔌 Circuit Breaker Status</h1>
+  <div class="meta">
+    <strong><%= breakerData.length %></strong> monitored hosts
+    • Last updated: <%= new Date().toLocaleString() %>
+  </div>
+  <a href="/admin/breaker?format=json" class="json-link">📊 View JSON API</a>
+</div>
+
+<% if (breakerData.length === 0) { %>
+  <div class="empty-state">
+    <div class="empty-state-icon">🎯</div>
+    <div>No circuit breakers active yet</div>
+    <div style="margin-top: 5px; font-size: 14px;">Circuit breakers will appear here after making requests</div>
+  </div>
+<% } else { %>
+  <div class="breaker-grid">
+    <% breakerData.forEach(function(b) { %>
+      <div class="breaker-card <%= b.state %>">
+        <div class="breaker-header">
+          <div class="breaker-title"><%= b.targetId %></div>
+          <div class="breaker-state state-<%= b.state %>"><%= b.state %></div>
+        </div>
+        
+        <div class="stats-grid">
+          <div class="stat">
+            <div class="stat-label">Failures</div>
+            <div class="stat-value"><%= b.failureCount %></div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Successes</div>
+            <div class="stat-value"><%= b.successCount %></div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Failure Rate</div>
+            <div class="stat-value"><%= b.failureRate ? (b.failureRate * 100).toFixed(1) : '0.0' %>%</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Consecutive Fails</div>
+            <div class="stat-value"><%= b.consecutiveFailures %></div>
+          </div>
+        </div>
+        
+        <% if (b.recentOutcomes.length > 0) { %>
+          <div class="outcomes">
+            <div class="outcomes-title">Last 10 Outcomes</div>
+            <div class="outcomes-list">
+              <% b.recentOutcomes.forEach(function(outcome) { %>
+                <div class="outcome outcome-<%= outcome.outcome %>" title="<%= outcome.outcome %>">
+                  <%= outcome.outcome === 'success' ? '✓' : '✗' %>
+                </div>
+              <% }); %>
+            </div>
+          </div>
+        <% } %>
+        
+        <% if (b.lastError) { %>
+          <div class="last-error">
+            <div class="error-title">Last Error:</div>
+            <div><%= b.lastError %></div>
+          </div>
+        <% } %>
+        
+        <% if (b.openedAt) { %>
+          <div style="margin-top: 10px; font-size: 12px; color: #666;">
+            Opened: <%= new Date(b.openedAt).toLocaleString() %>
+          </div>
+        <% } %>
+        
+        <% if (b.nextProbeAt) { %>
+          <div style="margin-top: 5px; font-size: 12px; color: #666;">
+            Next probe: <%= new Date(b.nextProbeAt).toLocaleString() %>
+          </div>
+        <% } %>
+      </div>
+    <% }); %>
+  </div>
+<% } %>

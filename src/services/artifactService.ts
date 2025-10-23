@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { artifacts, type NewArtifact, type Artifact } from '../db/schema/artifacts';
+import { artifacts, findings, type NewArtifact, type Artifact } from '../db/schema';
 import { eq, and, lt } from 'drizzle-orm';
 import { storageService, type StorageResult, type ArtifactType } from './storageService';
 import { logger } from '../utils/logger';
@@ -11,11 +11,23 @@ export interface SaveArtifactInput {
 }
 
 export class ArtifactService {
-  /**
-   * Save an artifact to storage and record in database
-   */
   async saveArtifact(input: SaveArtifactInput): Promise<Artifact> {
     const { findingId, type, data } = input;
+
+    // Get the finding to retrieve runId
+    const [finding] = await db
+      .select()
+      .from(findings)
+      .where(eq(findings.id, findingId))
+      .limit(1);
+
+    if (!finding) {
+      throw new Error(`Finding ${findingId} not found`);
+    }
+
+    if (!finding.runId) {
+      throw new Error(`Finding ${findingId} has no runId`);
+    }
 
     let storageResult: StorageResult;
 
@@ -26,25 +38,25 @@ export class ArtifactService {
           if (!Buffer.isBuffer(data)) {
             throw new Error('Screenshot data must be a Buffer');
           }
-          storageResult = await storageService.saveScreenshot(findingId, data);
+          storageResult = await storageService.saveScreenshot(finding.runId, findingId, data);
           break;
 
         case 'har':
-          storageResult = await storageService.saveHAR(findingId, data);
+          storageResult = await storageService.saveHAR(finding.runId, findingId, data);
           break;
 
         case 'html':
           if (typeof data !== 'string') {
             throw new Error('HTML data must be a string');
           }
-          storageResult = await storageService.saveHTML(findingId, data);
+          storageResult = await storageService.saveHTML(finding.runId, findingId, data);
           break;
 
         case 'console_logs':
           if (!Array.isArray(data)) {
             throw new Error('Console logs data must be an array');
           }
-          storageResult = await storageService.saveConsoleLogs(findingId, data);
+          storageResult = await storageService.saveConsoleLogs(finding.runId, findingId, data);
           break;
 
         default:

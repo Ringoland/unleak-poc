@@ -1,7 +1,7 @@
 import { db } from '../db';
 import { runs, findings } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import { addRenderJob } from './queueService';
+import { addScanJob } from './queueService';
 import { logger } from '../utils/logger';
 import { nanoid } from 'nanoid';
 
@@ -79,19 +79,14 @@ export class RunService {
         createdFindings.push(finding);
         logger.info(`Created finding ${finding.id} for URL: ${url}`);
 
-        // Enqueue render job
-        const job = await addRenderJob({
+        // Enqueue scan job (scan worker will then queue render job)
+        const job = await addScanJob({
           findingId: finding.id,
           url,
-          options: {
-            timeout: 30000,
-            waitUntil: 'networkidle',
-            captureHAR: true,
-          },
         });
 
         jobIds.push(job.id!);
-        logger.info(`Enqueued job ${job.id} for finding ${finding.id}`);
+        logger.info(`Enqueued scan job ${job.id} for finding ${finding.id}`);
       } catch (error) {
         logger.error(`Failed to create finding for URL ${url}:`, error);
         // Continue with other URLs
