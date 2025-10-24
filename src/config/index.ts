@@ -46,6 +46,13 @@ export const config = {
     errorRateWindow: parseInt(process.env.BREAKER_ERROR_RATE_WINDOW || '10', 10),
   },
 
+  // Admin routes
+  admin: {
+    enabled: process.env.ADMIN_ENABLED === 'true',
+    username: process.env.BULL_BOARD_USERNAME || 'admin',
+    password: process.env.BULL_BOARD_PASSWORD || 'admin',
+  },
+
   // External services
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || '',
   stripeApiKey: process.env.STRIPE_API_KEY || '',

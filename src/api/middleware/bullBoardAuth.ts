@@ -1,12 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
+import { config } from '../../config';
 import { logger } from '../../utils/logger';
 
-const BULL_BOARD_USERNAME = process.env.BULL_BOARD_USERNAME || 'admin';
-const BULL_BOARD_PASSWORD = process.env.BULL_BOARD_PASSWORD || 'admin';
-
 export function bullBoardAuth(req: Request, res: Response, next: NextFunction) {
-  // Skip auth in development if credentials are not set
-  if (process.env.NODE_ENV === 'development' && !process.env.BULL_BOARD_PASSWORD) {
+  // If admin auth is disabled, allow all requests
+  if (!config.admin.enabled) {
+    return next();
+  }
+
+  // Skip auth in development if credentials are not set and ADMIN_ENABLED is false
+  if (process.env.NODE_ENV === 'development' && !process.env.BULL_BOARD_PASSWORD && !config.admin.enabled) {
     logger.warn('Bull Board authentication disabled in development mode');
     return next();
   }
@@ -23,7 +26,7 @@ export function bullBoardAuth(req: Request, res: Response, next: NextFunction) {
     const credentials = Buffer.from(base64Credentials, 'base64').toString('utf-8');
     const [username, password] = credentials.split(':');
 
-    if (username === BULL_BOARD_USERNAME && password === BULL_BOARD_PASSWORD) {
+    if (username === config.admin.username && password === config.admin.password) {
       return next();
     }
 

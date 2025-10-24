@@ -174,7 +174,7 @@ curl http://localhost:8000/health
 
 **Create a test run:**
 ```bash
-curl -X POST http://localhost:8000/api/scan \
+curl -X POST http://localhost:8000/api/runs \
   -H "Content-Type: application/json" \
   -d '{"urls": ["https://example.com"]}'
 
