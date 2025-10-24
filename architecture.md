@@ -736,7 +736,7 @@ The PoC must pass **6 acceptance gates**, with **Gate #3** (E2E Detector) being 
 **Validation**:
 ```bash
 npm run dev
-curl http://localhost:3000/ok
+curl http://localhost:8000/ok
 # Expected: {"ok": true}
 ```
 

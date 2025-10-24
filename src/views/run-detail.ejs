@@ -1,0 +1,120 @@
+<div class="header">
+  <h1>
+    🔍 Run Report
+    <span class="run-status" style="background-color: <%= statusColors[run.status] || '#6c757d' %>">
+      <%= run.status %>
+    </span>
+  </h1>
+  <div class="meta">
+    <div><strong>Run ID:</strong> <%= run.id %></div>
+    <div class="meta-row">
+      <div><strong>Type:</strong> <%= run.runType %></div>
+      <div><strong>Submitted:</strong> <%= new Date(run.submittedAt).toLocaleString() %></div>
+      <% if (run.startedAt) { %>
+        <div><strong>Started:</strong> <%= new Date(run.startedAt).toLocaleString() %></div>
+      <% } %>
+      <% if (run.completedAt) { %>
+        <div><strong>Completed:</strong> <%= new Date(run.completedAt).toLocaleString() %></div>
+      <% } %>
+    </div>
+  </div>
+  <a href="/admin/runs/<%= run.id %>?format=json" class="json-link">📊 View JSON API</a>
+</div>
+
+<div class="stats">
+  <div class="stat-card">
+    <div class="stat-label">Total URLs</div>
+    <div class="stat-value"><%= run.urlCount %></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Findings</div>
+    <div class="stat-value"><%= run.findingCount %></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">With Evidence</div>
+    <div class="stat-value"><%= findingsWithArtifacts.filter(f => f.artifacts.length > 0).length %></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Suppressed</div>
+    <div class="stat-value"><%= findingsWithArtifacts.filter(f => f.finding.status === 'suppressed').length %></div>
+  </div>
+</div>
+
+<div class="findings-section">
+  <div class="findings-header">
+    📋 Findings (<%= findingsWithArtifacts.length %>)
+  </div>
+  
+  <% if (findingsWithArtifacts.length === 0) { %>
+    <div class="empty-state">
+      <div class="empty-state-icon">📭</div>
+      <div>No findings yet</div>
+      <div style="margin-top: 5px; font-size: 14px;">Findings will appear here as URLs are scanned</div>
+    </div>
+  <% } else { %>
+    <table class="findings-table">
+      <thead>
+        <tr>
+          <th>URL</th>
+          <th>Status</th>
+          <th>Type / Severity</th>
+          <th>Artifacts</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% findingsWithArtifacts.forEach(function({ finding, artifacts }) { %>
+          <tr>
+            <td class="url-cell">
+              <%= finding.url %>
+              <% if (finding.fingerprint) { %>
+                <div class="fingerprint" title="Fingerprint"><%= finding.fingerprint %></div>
+              <% } %>
+            </td>
+            <td>
+              <span class="finding-status" style="background-color: <%= statusColors[finding.status] || '#6c757d' %>">
+                <%= finding.status %>
+              </span>
+              <% if (finding.findingType) { %>
+                <div class="finding-meta"><%= finding.findingType %></div>
+              <% } %>
+            </td>
+            <td>
+              <% if (finding.severity) { 
+                const severityColor = finding.severity === 'high' ? '#dc3545' : finding.severity === 'medium' ? '#ffc107' : '#28a745';
+              %>
+                <div style="font-weight: 600; color: <%= severityColor %>;"><%= finding.severity.toUpperCase() %></div>
+              <% } else { %>
+                <div style="color: #999;">—</div>
+              <% } %>
+              <% if (finding.title) { %>
+                <div class="finding-meta"><%= finding.title %></div>
+              <% } %>
+            </td>
+            <td>
+              <% if (artifacts.length === 0) { %>
+                <span style="color: #999;">No artifacts</span>
+              <% } else { %>
+                <div class="artifacts">
+                  <% artifacts.forEach(function(artifact) {
+                    const artifactTypeLabels = {
+                      screenshot: '📸 Screenshot',
+                      html: '📄 HTML',
+                      har: '📦 HAR',
+                      console_logs: '📋 Logs'
+                    };
+                    const label = artifactTypeLabels[artifact.type] || artifact.type;
+                    const absolutePath = path.resolve(process.cwd(), 'artifacts', artifact.storageUrl);
+                  %>
+                    <a href="file://<%= absolutePath %>" class="artifact-link <%= artifact.type %>" target="_blank" title="<%= artifact.storageUrl %>">
+                      <%= label %>
+                    </a>
+                  <% }); %>
+                </div>
+              <% } %>
+            </td>
+          </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  <% } %>
+</div>

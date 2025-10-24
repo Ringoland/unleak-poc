@@ -12,6 +12,37 @@ export const runsCreatedCounter = new Counter({
 });
 
 /**
+ * Runs by status (Day-5)
+ */
+export const runsCompletedCounter = new Counter({
+  name: 'unleak_runs_total',
+  help: 'Total number of scan runs by status',
+  labelNames: ['status'], // 'queued', 'in_progress', 'completed', 'failed'
+  registers: [metricsRegistry],
+});
+
+/**
+ * Fetch latency (Day-5 - alias for http_request_duration_ms)
+ */
+export const fetchLatencyHistogram = new Histogram({
+  name: 'unleak_fetch_latency_ms',
+  help: 'Fetch latency in milliseconds',
+  labelNames: ['targetUrl'],
+  buckets: [50, 100, 250, 500, 1000, 1500, 2000, 3000, 5000, 10000],
+  registers: [metricsRegistry],
+});
+
+/**
+ * Status codes (Day-5)
+ */
+export const statusCodeCounter = new Counter({
+  name: 'unleak_status_code_total',
+  help: 'HTTP status codes encountered',
+  labelNames: ['code'],
+  registers: [metricsRegistry],
+});
+
+/**
  * HTTP response status codes
  */
 export const httpResponseStatusCounter = new Counter({
@@ -240,6 +271,39 @@ export function recordRunCreated(runType: string): void {
     runsCreatedCounter.labels(runType).inc();
   } catch (error) {
     logger.error('[Metrics] Error recording run created', { error });
+  }
+}
+
+/**
+ * Record a run status change (Day-5)
+ */
+export function recordRunStatus(status: string): void {
+  try {
+    runsCompletedCounter.labels(status).inc();
+  } catch (error) {
+    logger.error('[Metrics] Error recording run status', { error });
+  }
+}
+
+/**
+ * Record fetch latency (Day-5)
+ */
+export function recordFetchLatency(targetUrl: string, latencyMs: number): void {
+  try {
+    fetchLatencyHistogram.labels(targetUrl).observe(latencyMs);
+  } catch (error) {
+    logger.error('[Metrics] Error recording fetch latency', { error });
+  }
+}
+
+/**
+ * Record status code (Day-5)
+ */
+export function recordStatusCode(code: string): void {
+  try {
+    statusCodeCounter.labels(code).inc();
+  } catch (error) {
+    logger.error('[Metrics] Error recording status code', { error });
   }
 }
 

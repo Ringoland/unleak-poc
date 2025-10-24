@@ -29,9 +29,14 @@ coverage
 build/
 out/
 
+# Database
+drizzle/
+
 # Playwright
 test-results/
 playwright-report/
 playwright/.cache/
 
+# Unleak artifacts
 artifacts/
+reports/
