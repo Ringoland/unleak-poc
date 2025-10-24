@@ -81,7 +81,8 @@ export class BreakerService {
     try {
       const keys = this.getKeys(targetId);
       await this.redis.set(keys.state, 'half_open');
-      logger.info(`Circuit breaker for ${targetId} transitioned to half-open`);
+      const host = new URL(targetId).host;
+      logger.info(`[Breaker] ${host}: closed → half_open (probe)`);
     } catch (error) {
       logger.error(`Failed to transition ${targetId} to half-open:`, error);
     }
@@ -107,14 +108,17 @@ export class BreakerService {
       // Handle state-specific logic
       if (currentState === 'half_open') {
         // Failed probe → reopen circuit with extended cooldown
+        const host = new URL(targetId).host;
         await this.openCircuit(targetId, true);
-        logger.warn(`Half-open probe failed for ${targetId}, reopening circuit`);
+        logger.warn(`[Breaker] ${host}: half_open → open (probe failed, extended cooldown)`);
       } else if (currentState === 'closed') {
         // Check if we should open the circuit
         const shouldOpen = await this.shouldOpenCircuit(targetId, failCount);
         if (shouldOpen) {
+          const host = new URL(targetId).host;
           await this.openCircuit(targetId, false);
-          logger.warn(`Circuit opened for ${targetId} after ${failCount} failures`);
+          const openMinutes = Math.round(this.config.openDurationMs / 60000);
+          logger.warn(`[Breaker] ${host}: closed → open (${failCount} failures, ${openMinutes}m window)`);
         }
       }
     } catch (error) {
@@ -135,8 +139,9 @@ export class BreakerService {
 
       // If half-open and probe succeeded, reset to closed
       if (currentState === 'half_open') {
+        const host = new URL(targetId).host;
         await this.resetCircuit(targetId);
-        logger.info(`Circuit breaker for ${targetId} reset to closed after successful probe`);
+        logger.info(`[Breaker] ${host}: half_open → closed (probe succeeded)`);
       }
     } catch (error) {
       logger.error(`Failed to record success for ${targetId}:`, error);
@@ -196,9 +201,10 @@ export class BreakerService {
         .set(keys.nextProbe, nextProbe.toString())
         .exec();
 
-      logger.info(
-        `Circuit breaker opened for ${targetId}, next probe at ${new Date(nextProbe).toISOString()}`
-      );
+      // Concise single-line log with key info
+      const host = new URL(targetId).host;
+      const windowMinutes = Math.round(delayMs / 60000);
+      logger.info(`[Breaker] ${host}: open (${windowMinutes}m window until ${new Date(nextProbe).toISOString()})`);
     } catch (error) {
       logger.error(`Failed to open circuit for ${targetId}:`, error);
     }

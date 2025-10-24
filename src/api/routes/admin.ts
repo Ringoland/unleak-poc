@@ -203,11 +203,16 @@ router.get('/runs/:id', async (req: Request, res: Response) => {
     }
 
     // Return JSON if not HTML
+    // Include full artifact file paths for Day-6 requirements
     return res.json({
       run,
       findings: findingsWithArtifacts.map(({ finding, artifacts: findingArtifacts }) => ({
         ...finding,
-        artifacts: findingArtifacts,
+        artifacts: findingArtifacts.map(artifact => ({
+          ...artifact,
+          fullPath: `artifacts/${artifact.storageUrl}`,
+          absolutePath: `${process.cwd()}/artifacts/${artifact.storageUrl}`,
+        })),
       })),
     });
   } catch (error) {

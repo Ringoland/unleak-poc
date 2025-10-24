@@ -16,21 +16,53 @@ For detailed Day-4 documentation, see [DAY4_IMPLEMENTATION.md](./DAY4_IMPLEMENTA
 ### Prerequisites
 
 Before starting, ensure you have:
+
+**Required:**
 - **Node.js** v18+ ([Download](https://nodejs.org/))
-- **pnpm** v8+ (install: `npm install -g pnpm`)
-- **PostgreSQL** v14+ ([Download](https://www.postgresql.org/download/))
-- **Docker** (for Redis) ([Download](https://www.docker.com/products/docker-desktop/))
+- **pnpm** v8+ (faster, more efficient than npm)
+- **PostgreSQL** v14+ (local or Docker)
+- **Redis** (local or Docker)
+
+**Install pnpm:**
+```bash
+# macOS/Linux
+npm install -g pnpm
+
+# Or via curl
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+
+# Windows (PowerShell)
+iwr https://get.pnpm.io/install.ps1 -useb | iex
+```
+
+**Why pnpm?**
+- ⚡ 2-3x faster than npm
+- 💾 Saves disk space with content-addressable storage
+- 🔒 Strict dependency resolution (no phantom dependencies)
 
 ### 1. Install Dependencies
 
 ```bash
-# Install Node packages and Playwright browsers
+# Install Node packages + Playwright browsers (automatic)
 pnpm install
 
-# Or if postinstall fails, run separately:
+# If postinstall fails, install Playwright manually:
 pnpm install
 npx playwright install chromium
+
+# Verify Playwright installation
+npx playwright --version
 ```
+
+**Playwright Notes:**
+- Chromium browser (~300MB) downloads during `pnpm install`
+- **Windows:** May require [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
+- **macOS:** May require Rosetta 2 on Apple Silicon: `softwareupdate --install-rosetta`
+- **Linux:** May need system dependencies:
+  ```bash
+  # Ubuntu/Debian
+  npx playwright install-deps chromium
+  ```
 
 ### 2. Setup PostgreSQL
 
@@ -745,6 +777,190 @@ After the test completes, view the run in your browser:
 ```bash
 # Get the run ID from the test output, then:
 open http://localhost:8000/admin/runs/{runId}
+```
+
+---
+
+## Day-6: Stripe Lite (Non-Transactional) + Polish
+
+### Stripe Lite Integration
+
+Stripe Lite provides mock payment flows for testing without creating real charges or customers. **Safe by default** - all routes no-op unless explicitly enabled.
+
+**Configuration:**
+```bash
+# In .env file
+STRIPE_LITE_ENABLED=false  # Set to 'true' to enable endpoints
+STRIPE_API_KEY=            # Optional: for webhook signature validation
+```
+
+#### Health Check
+
+Check if Stripe Lite is enabled and configured:
+
+```bash
+curl http://localhost:8000/api/stripe/health
+```
+
+**Response (disabled):**
+```json
+{
+  "enabled": false,
+  "keyPresent": false
+}
+```
+
+**Response (enabled):**
+```json
+{
+  "enabled": true,
+  "keyPresent": true
+}
+```
+
+#### Mock Payment Intent
+
+Create a mock payment intent (no real charge). Requires `STRIPE_LITE_ENABLED=true`.
+
+```bash
+curl -X POST http://localhost:8000/api/stripe/mock-intent \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "plan": "pro"
+  }'
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "id": "pi_mock_a1b2c3d4e5f6",
+  "plan": "pro",
+  "email": "user@example.com"
+}
+```
+
+**Audit Logging:**
+Each mock intent creates a redacted audit row in `stripe_events` table:
+```sql
+SELECT * FROM stripe_events ORDER BY created_at DESC LIMIT 1;
+```
+
+Result shows PII redaction:
+```
+id: abc-123
+event_type: mock_intent
+mock_id: pi_mock_a1b2c3d4e5f6
+plan: pro
+payload: {"email": "***@example.com", "plan": "pro"}
+created_at: 2025-10-24T10:30:00Z
+```
+
+#### Webhook Endpoint
+
+Receives Stripe webhook events (no side effects). Always returns `200 {received:true}` to prevent retries.
+
+```bash
+curl -X POST http://localhost:8000/api/stripe/webhook \
+  -H "Content-Type: application/json" \
+  -H "stripe-signature: test_signature" \
+  -d '{
+    "id": "evt_test_123",
+    "type": "payment_intent.succeeded",
+    "data": {
+      "object": {
+        "id": "pi_123",
+        "amount": 1000
+      }
+    }
+  }'
+```
+
+**Response (always 200):**
+```json
+{
+  "received": true
+}
+```
+
+**Safety Features:**
+- ✅ No real charges created
+- ✅ No customer objects created
+- ✅ PII redacted in audit logs (emails show `***@domain.com`)
+- ✅ Webhook signature validation (if `STRIPE_API_KEY` present)
+- ✅ All operations logged for audit trail
+
+### Artifacts Structure
+
+**New in Day-6:** Artifacts are organized with URL hashing for better organization:
+
+```
+artifacts/
+├── <runId>/
+│   ├── <findingId>/
+│   │   ├── <url-hash>/          # NEW: 8-char MD5 hash of URL
+│   │   │   ├── screenshot.png
+│   │   │   ├── page.html
+│   │   │   ├── trace.har
+│   │   │   └── console.json
+```
+
+**Benefits:**
+- Multiple findings from same run + URL don't collide
+- Easier to find artifacts for specific URLs
+- Backwards compatible with old flat structure
+
+**API Response includes full paths:**
+```bash
+curl http://localhost:8000/api/admin/runs/{runId}
+```
+
+Response includes artifact paths:
+```json
+{
+  "run": { "id": "...", "status": "completed" },
+  "findings": [
+    {
+      "id": "finding-123",
+      "url": "https://example.com",
+      "artifacts": [
+        {
+          "id": "artifact-456",
+          "type": "screenshot",
+          "storageUrl": "runId/findingId/a1b2c3d4/screenshot.png",
+          "fullPath": "artifacts/runId/findingId/a1b2c3d4/screenshot.png",
+          "absolutePath": "/path/to/project/artifacts/runId/findingId/a1b2c3d4/screenshot.png"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Tuning & Configuration
+
+**New Configurable Thresholds:**
+
+```bash
+# In .env file
+
+# robots.txt cache duration (seconds)
+ROBOTS_CACHE_TTL_SECONDS=600  # Default: 10 minutes
+
+# Latency threshold for slow request warnings (milliseconds)
+LATENCY_MS_THRESHOLD=1500     # Default: 1.5 seconds
+```
+
+**Circuit Breaker Logging:**
+Improved logging with concise single-line state transitions:
+
+```
+[Breaker] example.com: closed → open (5 failures, 20m window)
+[Breaker] example.com: open (20m window until 2025-10-24T11:00:00Z)
+[Breaker] example.com: open → half_open (probe)
+[Breaker] example.com: half_open → closed (probe succeeded)
+[Breaker] example.com: half_open → open (probe failed, extended cooldown)
 ```
 
 ---
