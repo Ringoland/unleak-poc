@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { stripeEvents } from '../db/schema';
 import { logger } from '../utils/logger';
+import { redactObject } from '../utils/redact';
 import crypto from 'crypto';
 import Stripe from 'stripe';
 
@@ -39,31 +40,9 @@ export function getStripeHealth(): StripeHealthResponse {
 }
 
 /**
- * Redact PII from payload for audit logging
- */
-function redactPII(payload: any): any {
-  const redacted = { ...payload };
-  
-  // Redact email - keep domain for debugging
-  if (redacted.email) {
-    const [, domain] = redacted.email.split('@');
-    redacted.email = domain ? `***@${domain}` : '***@***';
-  }
-
-  // Redact any other sensitive fields
-  if (redacted.card) {
-    redacted.card = '[REDACTED]';
-  }
-  if (redacted.payment_method) {
-    redacted.payment_method = '[REDACTED]';
-  }
-
-  return redacted;
-}
-
-/**
  * Create a mock payment intent (no real charge)
  * Returns a fake payment intent ID and logs to audit table
+ * NO REAL STRIPE CALLS - just synthesizes an ID and writes audit row
  */
 export async function createMockIntent(request: MockIntentRequest): Promise<MockIntentResponse> {
   const health = getStripeHealth();
@@ -72,7 +51,7 @@ export async function createMockIntent(request: MockIntentRequest): Promise<Mock
     throw new Error('Stripe Lite is disabled. Set STRIPE_LITE_ENABLED=true to enable.');
   }
 
-  // Generate a fake payment intent ID
+  // Generate a fake payment intent ID (NO REAL STRIPE API CALL)
   const paymentId = `pi_mock_${crypto.randomBytes(12).toString('hex')}`;
 
   // Prepare response
@@ -83,10 +62,10 @@ export async function createMockIntent(request: MockIntentRequest): Promise<Mock
     email: request.email,
   };
 
-  // Redact PII before storing
-  const redactedPayload = redactPII(request);
+  // Redact PII before storing - use redactObject helper
+  const redactedPayload = redactObject(request);
 
-  // Persist audit event
+  // Persist audit event (no side effects, just logging)
   try {
     await db.insert(stripeEvents).values({
       eventType: 'mock_intent',
@@ -95,15 +74,13 @@ export async function createMockIntent(request: MockIntentRequest): Promise<Mock
       payload: redactedPayload,
     });
 
-    logger.info('Created mock payment intent', {
-      paymentId,
-      plan: request.plan,
-      emailDomain: request.email ? request.email.split('@')[1] : undefined,
+    // Clean logs: no emails, no keys, just plan
+    logger.info('stripe.mock_intent ok', {
+      plan: request.plan || 'none',
     });
   } catch (error) {
-    logger.error('Failed to persist mock intent audit event', {
+    logger.error('stripe.mock_intent failed to persist audit', {
       error: error instanceof Error ? error.message : String(error),
-      paymentId,
     });
     // Continue - don't fail the request due to audit logging
   }
@@ -113,7 +90,8 @@ export async function createMockIntent(request: MockIntentRequest): Promise<Mock
 
 /**
  * Validate Stripe webhook signature
- * Returns the parsed event if valid, or null if invalid
+ * Only validates if STRIPE_WEBHOOK_SECRET is set
+ * Returns the parsed event if valid, or null if invalid/skipped
  */
 function validateWebhookSignature(
   payload: string | Buffer,
@@ -121,9 +99,9 @@ function validateWebhookSignature(
 ): any | null {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+  // Skip validation if no webhook secret configured
   if (!webhookSecret || !webhookSecret.trim()) {
-    logger.info('Webhook signature validation skipped (no webhook secret configured)');
-    return null; // Skip validation if no webhook secret
+    return null;
   }
 
   try {
@@ -138,66 +116,63 @@ function validateWebhookSignature(
       webhookSecret
     );
 
-    logger.info('Webhook signature validation succeeded', {
-      eventType: event.type,
-      eventId: event.id,
-    });
-
     return event;
   } catch (error) {
-    logger.error('Webhook signature validation failed', {
-      error: error instanceof Error ? error.message : String(error),
+    // Log failure but don't expose details
+    logger.error('stripe.webhook signature validation failed', {
+      error: error instanceof Error ? error.message : 'unknown',
     });
     return null;
   }
 }
 
 /**
- * Handle Stripe webhook (no side effects)
- * Always returns 200 {received:true} to prevent retries
+ * Handle Stripe webhook (NO SIDE EFFECTS)
+ * Acknowledges receipt (200) and exits without state changes
+ * Verifies signature only if STRIPE_WEBHOOK_SECRET is set
+ * Always returns 200 {received:true}
  */
 export async function handleWebhook(
   rawPayload: string | Buffer,
   signature?: string
 ): Promise<WebhookResponse> {
-  const health = getStripeHealth();
   let verifiedEvent: any = null;
   let payload: any;
 
-  // Validate signature if webhook secret is configured
+  // Validate signature only if STRIPE_WEBHOOK_SECRET is present
   if (signature && process.env.STRIPE_WEBHOOK_SECRET) {
     verifiedEvent = validateWebhookSignature(rawPayload, signature);
     
-    if (!verifiedEvent) {
-      logger.warn('Webhook signature validation failed, but returning 200 to prevent retries');
-      // Parse the raw payload manually as fallback
-      payload = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
-    } else {
-      // Use the verified event
+    if (verifiedEvent) {
       payload = verifiedEvent;
+    } else {
+      // Validation failed, but still parse payload for logging
+      try {
+        payload = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
+      } catch {
+        payload = {};
+      }
     }
   } else {
-    // No signature validation - parse payload directly
-    if (!signature) {
-      logger.info('Webhook received without signature header');
-    } else {
-      logger.info('Webhook signature validation skipped (no webhook secret configured)');
+    // No signature or no webhook secret - parse payload directly
+    try {
+      payload = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
+    } catch {
+      payload = {};
     }
-    payload = typeof rawPayload === 'string' ? JSON.parse(rawPayload) : rawPayload;
   }
 
-  // Log webhook receipt
-  logger.info('Stripe webhook received', {
-    enabled: health.enabled,
+  // Clean log: no emails, no keys - just type and verification status
+  logger.info('stripe.webhook received', {
+    type: payload?.type || 'unknown',
     verified: Boolean(verifiedEvent),
-    type: payload?.type,
-    id: payload?.id,
   });
 
-  // Persist audit event if enabled
-  if (health.enabled) {
+  // Persist audit event (no side effects, just logging)
+  // Only if STRIPE_LITE_ENABLED is true
+  if (process.env.STRIPE_LITE_ENABLED === 'true') {
     try {
-      const redactedPayload = redactPII(payload);
+      const redactedPayload = redactObject(payload);
       
       await db.insert(stripeEvents).values({
         eventType: 'webhook',
@@ -205,17 +180,15 @@ export async function handleWebhook(
         plan: payload?.data?.object?.metadata?.plan || null,
         payload: redactedPayload,
       });
-
-      logger.info('Webhook audit event persisted');
     } catch (error) {
-      logger.error('Failed to persist webhook audit event', {
-        error: error instanceof Error ? error.message : String(error),
+      // Log error but don't fail - webhook must always return 200
+      logger.error('stripe.webhook audit persist failed', {
+        error: error instanceof Error ? error.message : 'unknown',
       });
-      // Continue - don't fail the webhook due to audit logging
     }
   }
 
-  // Always return 200 to prevent Stripe retries
+  // Always return 200 to prevent Stripe retries (NO STATE CHANGES)
   return { received: true };
 }
 

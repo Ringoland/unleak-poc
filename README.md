@@ -787,14 +787,25 @@ open http://localhost:8000/admin/runs/{runId}
 
 Stripe Lite provides mock payment flows for testing without creating real charges or customers. **Safe by default** - all routes no-op unless explicitly enabled.
 
+**⚠️ Important: NO REAL BILLING** - This is mock/audit-only. Real billing comes after PoC.
+
 **Configuration:**
 ```bash
-# In .env file
-STRIPE_LITE_ENABLED=false  # Set to 'true' to enable endpoints
-STRIPE_API_KEY=            # Optional: for webhook signature validation
+# In .env file (source of truth)
+STRIPE_LITE_ENABLED=false           # Set to 'true' to enable (default: false)
+STRIPE_API_KEY=                     # Optional: sk_test_... for webhook validation
+STRIPE_WEBHOOK_SECRET=              # Optional: whsec_... from Stripe Dashboard
 ```
 
-#### Health Check
+**Three Endpoints:**
+
+1. `GET /api/stripe/health` - Check status
+2. `POST /api/stripe/mock-intent` - Create mock payment intent (NO REAL CHARGE)
+3. `POST /api/stripe/webhook` - Receive webhooks (NO SIDE EFFECTS)
+
+---
+
+#### 1. Health Check
 
 Check if Stripe Lite is enabled and configured:
 
@@ -802,25 +813,22 @@ Check if Stripe Lite is enabled and configured:
 curl http://localhost:8000/api/stripe/health
 ```
 
-**Response (disabled):**
+**Response:**
 ```json
 {
-  "enabled": false,
-  "keyPresent": false
+  "enabled": true,        // STRIPE_LITE_ENABLED status
+  "keyPresent": true      // Whether STRIPE_API_KEY is set
 }
 ```
 
-**Response (enabled):**
-```json
-{
-  "enabled": true,
-  "keyPresent": true
-}
-```
+---
 
-#### Mock Payment Intent
+#### 2. Mock Payment Intent
 
-Create a mock payment intent (no real charge). Requires `STRIPE_LITE_ENABLED=true`.
+Creates a mock payment intent (**NO REAL STRIPE API CALL**). Just synthesizes an ID and writes a redacted audit row.
+
+**Requirements:**
+- `STRIPE_LITE_ENABLED=true`
 
 ```bash
 curl -X POST http://localhost:8000/api/stripe/mock-intent \
@@ -841,38 +849,49 @@ curl -X POST http://localhost:8000/api/stripe/mock-intent \
 }
 ```
 
-**Audit Logging:**
-Each mock intent creates a redacted audit row in `stripe_events` table:
+**What happens:**
+- ✅ Generates fake payment intent ID
+- ✅ Writes redacted audit row to `stripe_events` table
+- ❌ **NO** real Stripe API calls
+- ❌ **NO** customers/charges/subscriptions created
+
+**Audit Log:**
 ```sql
 SELECT * FROM stripe_events ORDER BY created_at DESC LIMIT 1;
 ```
 
-Result shows PII redaction:
 ```
-id: abc-123
 event_type: mock_intent
-mock_id: pi_mock_a1b2c3d4e5f6
+payment_id: pi_mock_a1b2c3d4e5f6
 plan: pro
-payload: {"email": "***@example.com", "plan": "pro"}
-created_at: 2025-10-24T10:30:00Z
+payload: {"email": "***@example.com", "plan": "pro"}  ← PII redacted
 ```
 
-#### Webhook Endpoint
+**Clean Logs:**
+```
+stripe.mock_intent ok plan=pro
+```
+No emails, no keys, just the plan.
 
-Receives Stripe webhook events (no side effects). Always returns `200 {received:true}` to prevent retries.
+---
+
+#### 3. Webhook Handler
+
+Receives Stripe webhook events. **NO SIDE EFFECTS** - just acknowledges (200) and exits.
+
+**Signature Verification:**
+- Only validates if `STRIPE_WEBHOOK_SECRET` is set
+- Always returns `200 {received:true}` regardless of validation result
 
 ```bash
 curl -X POST http://localhost:8000/api/stripe/webhook \
   -H "Content-Type: application/json" \
-  -H "stripe-signature: test_signature" \
+  -H "stripe-signature: t=123,v1=sig..." \
   -d '{
-    "id": "evt_test_123",
+    "id": "evt_123",
     "type": "payment_intent.succeeded",
     "data": {
-      "object": {
-        "id": "pi_123",
-        "amount": 1000
-      }
+      "object": {"id": "pi_123", "amount": 1000}
     }
   }'
 ```
@@ -884,12 +903,147 @@ curl -X POST http://localhost:8000/api/stripe/webhook \
 }
 ```
 
-**Safety Features:**
-- ✅ No real charges created
-- ✅ No customer objects created
-- ✅ PII redacted in audit logs (emails show `***@domain.com`)
-- ✅ Webhook signature validation (if `STRIPE_API_KEY` present)
-- ✅ All operations logged for audit trail
+**What happens:**
+- ✅ Verifies signature (if `STRIPE_WEBHOOK_SECRET` set)
+- ✅ Writes redacted audit row
+- ✅ Always returns 200 to prevent retries
+- ❌ **NO** state changes
+- ❌ **NO** customer updates
+- ❌ **NO** billing operations
+
+**Clean Logs:**
+```
+stripe.webhook received type=payment_intent.succeeded verified=true
+```
+
+---
+
+### Testing Stripe Locally
+
+#### Option 1: Manual cURL (No Signature)
+
+1. **Enable Stripe Lite:**
+```bash
+# In .env
+STRIPE_LITE_ENABLED=true
+```
+
+2. **Start server:**
+```bash
+pnpm dev
+```
+
+3. **Test health:**
+```bash
+curl http://localhost:8000/api/stripe/health
+```
+
+4. **Create mock intent:**
+```bash
+curl -X POST http://localhost:8000/api/stripe/mock-intent \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","plan":"premium"}'
+```
+
+5. **Send webhook (no signature):**
+```bash
+curl -X POST http://localhost:8000/api/stripe/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"type":"payment_intent.succeeded","id":"evt_test"}'
+```
+
+---
+
+#### Option 2: Stripe CLI (With Signature Verification)
+
+**Install Stripe CLI:**
+```bash
+# macOS
+brew install stripe/stripe-cli/stripe
+
+# Windows
+scoop install stripe
+
+# Or download from: https://stripe.com/docs/stripe-cli
+```
+
+**Setup:**
+
+1. **Login to Stripe:**
+```bash
+stripe login
+```
+
+2. **Forward webhooks to local server:**
+```bash
+stripe listen --forward-to http://localhost:8000/api/stripe/webhook
+```
+
+This outputs a webhook signing secret like:
+```
+Ready! Your webhook signing secret is whsec_xxxxx
+```
+
+3. **Add to .env:**
+```bash
+STRIPE_LITE_ENABLED=true
+STRIPE_API_KEY=sk_test_your_key_here
+STRIPE_WEBHOOK_SECRET=whsec_xxxxx  # From stripe listen
+```
+
+4. **Trigger test events:**
+```bash
+# Send a test webhook
+stripe trigger payment_intent.succeeded
+
+# Or custom events
+stripe trigger invoice.paid
+stripe trigger customer.created
+```
+
+5. **Verify in logs:**
+```bash
+# Check server logs for:
+stripe.webhook received type=payment_intent.succeeded verified=true
+
+# Check database:
+psql unleak_poc -c "SELECT * FROM stripe_events ORDER BY created_at DESC LIMIT 5;"
+```
+
+---
+
+### Security & Redaction
+
+**Sensitive data is NEVER logged in clear text:**
+
+- ✅ Emails redacted: `user@example.com` → `***@example.com`
+- ✅ Stripe keys redacted: `sk_test_abc123` → `sk_***`
+- ✅ Webhook secrets redacted: `whsec_abc123` → `whsec_***`
+- ✅ Authorization headers redacted: `Bearer abc123` → `Bearer ***`
+
+**Redaction helper:** `src/utils/redact.ts`
+
+**Example logs:**
+```
+stripe.mock_intent ok plan=premium
+stripe.webhook received type=invoice.paid verified=true
+```
+
+**No emails, no keys, no Authorization headers in logs.**
+
+---
+
+### Safety Features
+
+- ✅ **Flag-gated:** `STRIPE_LITE_ENABLED=false` by default
+- ✅ **NO real charges:** Mock IDs only
+- ✅ **NO customer creation:** Audit logging only
+- ✅ **NO subscriptions:** Test mode only
+- ✅ **Webhook always returns 200:** Prevents retry storms
+- ✅ **PII redaction:** Emails/keys never logged in clear
+- ✅ **Signature verification:** Optional via `STRIPE_WEBHOOK_SECRET`
+
+---
 
 ### Artifacts Structure
 
