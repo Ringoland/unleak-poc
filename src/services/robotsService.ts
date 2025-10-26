@@ -1,8 +1,9 @@
 import { Redis } from 'ioredis';
 import { logger } from '../utils/logger';
+import { config } from '../config';
 
 const ROBOTS_CACHE_PREFIX = 'robots:';
-const ROBOTS_CACHE_TTL = 600; // 10 minutes
+const ROBOTS_CACHE_TTL = config.tuning.robotsCacheTtlSeconds;
 
 export interface RobotsTxtRules {
   disallowedPaths: string[];

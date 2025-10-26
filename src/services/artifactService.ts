@@ -33,30 +33,31 @@ export class ArtifactService {
 
     try {
       // Save to storage based on type
+      // Pass the URL for new directory structure: artifacts/<runId>/<findingId>/<url-hash>/
       switch (type) {
         case 'screenshot':
           if (!Buffer.isBuffer(data)) {
             throw new Error('Screenshot data must be a Buffer');
           }
-          storageResult = await storageService.saveScreenshot(finding.runId, findingId, data);
+          storageResult = await storageService.saveScreenshot(finding.runId, findingId, data, finding.url);
           break;
 
         case 'har':
-          storageResult = await storageService.saveHAR(finding.runId, findingId, data);
+          storageResult = await storageService.saveHAR(finding.runId, findingId, data, finding.url);
           break;
 
         case 'html':
           if (typeof data !== 'string') {
             throw new Error('HTML data must be a string');
           }
-          storageResult = await storageService.saveHTML(finding.runId, findingId, data);
+          storageResult = await storageService.saveHTML(finding.runId, findingId, data, finding.url);
           break;
 
         case 'console_logs':
           if (!Array.isArray(data)) {
             throw new Error('Console logs data must be an array');
           }
-          storageResult = await storageService.saveConsoleLogs(finding.runId, findingId, data);
+          storageResult = await storageService.saveConsoleLogs(finding.runId, findingId, data, finding.url);
           break;
 
         default:
