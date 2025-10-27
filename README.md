@@ -16,21 +16,53 @@ For detailed Day-4 documentation, see [DAY4_IMPLEMENTATION.md](./DAY4_IMPLEMENTA
 ### Prerequisites
 
 Before starting, ensure you have:
+
+**Required:**
 - **Node.js** v18+ ([Download](https://nodejs.org/))
-- **pnpm** v8+ (install: `npm install -g pnpm`)
-- **PostgreSQL** v14+ ([Download](https://www.postgresql.org/download/))
-- **Docker** (for Redis) ([Download](https://www.docker.com/products/docker-desktop/))
+- **pnpm** v8+ (faster, more efficient than npm)
+- **PostgreSQL** v14+ (local or Docker)
+- **Redis** (local or Docker)
+
+**Install pnpm:**
+```bash
+# macOS/Linux
+npm install -g pnpm
+
+# Or via curl
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+
+# Windows (PowerShell)
+iwr https://get.pnpm.io/install.ps1 -useb | iex
+```
+
+**Why pnpm?**
+- ⚡ 2-3x faster than npm
+- 💾 Saves disk space with content-addressable storage
+- 🔒 Strict dependency resolution (no phantom dependencies)
 
 ### 1. Install Dependencies
 
 ```bash
-# Install Node packages and Playwright browsers
+# Install Node packages + Playwright browsers (automatic)
 pnpm install
 
-# Or if postinstall fails, run separately:
+# If postinstall fails, install Playwright manually:
 pnpm install
 npx playwright install chromium
+
+# Verify Playwright installation
+npx playwright --version
 ```
+
+**Playwright Notes:**
+- Chromium browser (~300MB) downloads during `pnpm install`
+- **Windows:** May require [Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist)
+- **macOS:** May require Rosetta 2 on Apple Silicon: `softwareupdate --install-rosetta`
+- **Linux:** May need system dependencies:
+  ```bash
+  # Ubuntu/Debian
+  npx playwright install-deps chromium
+  ```
 
 ### 2. Setup PostgreSQL
 
@@ -749,6 +781,344 @@ After the test completes, view the run in your browser:
 ```bash
 # Get the run ID from the test output, then:
 open http://localhost:8000/admin/runs/{runId}
+```
+
+---
+
+## Day-6: Stripe Lite (Non-Transactional) + Polish
+
+### Stripe Lite Integration
+
+Stripe Lite provides mock payment flows for testing without creating real charges or customers. **Safe by default** - all routes no-op unless explicitly enabled.
+
+**⚠️ Important: NO REAL BILLING** - This is mock/audit-only. Real billing comes after PoC.
+
+**Configuration:**
+```bash
+# In .env file (source of truth)
+STRIPE_LITE_ENABLED=false           # Set to 'true' to enable (default: false)
+STRIPE_API_KEY=                     # Optional: sk_test_... for webhook validation
+STRIPE_WEBHOOK_SECRET=              # Optional: whsec_... from Stripe Dashboard
+```
+
+**Three Endpoints:**
+
+1. `GET /api/stripe/health` - Check status
+2. `POST /api/stripe/mock-intent` - Create mock payment intent (NO REAL CHARGE)
+3. `POST /api/stripe/webhook` - Receive webhooks (NO SIDE EFFECTS)
+
+---
+
+#### 1. Health Check
+
+Check if Stripe Lite is enabled and configured:
+
+```bash
+curl http://localhost:8000/api/stripe/health
+```
+
+**Response:**
+```json
+{
+  "enabled": true,        // STRIPE_LITE_ENABLED status
+  "keyPresent": true      // Whether STRIPE_API_KEY is set
+}
+```
+
+---
+
+#### 2. Mock Payment Intent
+
+Creates a mock payment intent (**NO REAL STRIPE API CALL**). Just synthesizes an ID and writes a redacted audit row.
+
+**Requirements:**
+- `STRIPE_LITE_ENABLED=true`
+
+```bash
+curl -X POST http://localhost:8000/api/stripe/mock-intent \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "plan": "pro"
+  }'
+```
+
+**Response:**
+```json
+{
+  "ok": true,
+  "id": "pi_mock_a1b2c3d4e5f6",
+  "plan": "pro",
+  "email": "user@example.com"
+}
+```
+
+**What happens:**
+- ✅ Generates fake payment intent ID
+- ✅ Writes redacted audit row to `stripe_events` table
+- ❌ **NO** real Stripe API calls
+- ❌ **NO** customers/charges/subscriptions created
+
+**Audit Log:**
+```sql
+SELECT * FROM stripe_events ORDER BY created_at DESC LIMIT 1;
+```
+
+```
+event_type: mock_intent
+payment_id: pi_mock_a1b2c3d4e5f6
+plan: pro
+payload: {"email": "***@example.com", "plan": "pro"}  ← PII redacted
+```
+
+**Clean Logs:**
+```
+stripe.mock_intent ok plan=pro
+```
+No emails, no keys, just the plan.
+
+---
+
+#### 3. Webhook Handler
+
+Receives Stripe webhook events. **NO SIDE EFFECTS** - just acknowledges (200) and exits.
+
+**Signature Verification:**
+- Only validates if `STRIPE_WEBHOOK_SECRET` is set
+- Always returns `200 {received:true}` regardless of validation result
+
+```bash
+curl -X POST http://localhost:8000/api/stripe/webhook \
+  -H "Content-Type: application/json" \
+  -H "stripe-signature: t=123,v1=sig..." \
+  -d '{
+    "id": "evt_123",
+    "type": "payment_intent.succeeded",
+    "data": {
+      "object": {"id": "pi_123", "amount": 1000}
+    }
+  }'
+```
+
+**Response (always 200):**
+```json
+{
+  "received": true
+}
+```
+
+**What happens:**
+- ✅ Verifies signature (if `STRIPE_WEBHOOK_SECRET` set)
+- ✅ Writes redacted audit row
+- ✅ Always returns 200 to prevent retries
+- ❌ **NO** state changes
+- ❌ **NO** customer updates
+- ❌ **NO** billing operations
+
+**Clean Logs:**
+```
+stripe.webhook received type=payment_intent.succeeded verified=true
+```
+
+---
+
+### Testing Stripe Locally
+
+#### Option 1: Manual cURL (No Signature)
+
+1. **Enable Stripe Lite:**
+```bash
+# In .env
+STRIPE_LITE_ENABLED=true
+```
+
+2. **Start server:**
+```bash
+pnpm dev
+```
+
+3. **Test health:**
+```bash
+curl http://localhost:8000/api/stripe/health
+```
+
+4. **Create mock intent:**
+```bash
+curl -X POST http://localhost:8000/api/stripe/mock-intent \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","plan":"premium"}'
+```
+
+5. **Send webhook (no signature):**
+```bash
+curl -X POST http://localhost:8000/api/stripe/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"type":"payment_intent.succeeded","id":"evt_test"}'
+```
+
+---
+
+#### Option 2: Stripe CLI (With Signature Verification)
+
+**Install Stripe CLI:**
+```bash
+# macOS
+brew install stripe/stripe-cli/stripe
+
+# Windows
+scoop install stripe
+
+# Or download from: https://stripe.com/docs/stripe-cli
+```
+
+**Setup:**
+
+1. **Login to Stripe:**
+```bash
+stripe login
+```
+
+2. **Forward webhooks to local server:**
+```bash
+stripe listen --forward-to http://localhost:8000/api/stripe/webhook
+```
+
+This outputs a webhook signing secret like:
+```
+Ready! Your webhook signing secret is whsec_xxxxx
+```
+
+3. **Add to .env:**
+```bash
+STRIPE_LITE_ENABLED=true
+STRIPE_API_KEY=sk_test_your_key_here
+STRIPE_WEBHOOK_SECRET=whsec_xxxxx  # From stripe listen
+```
+
+4. **Trigger test events:**
+```bash
+# Send a test webhook
+stripe trigger payment_intent.succeeded
+
+# Or custom events
+stripe trigger invoice.paid
+stripe trigger customer.created
+```
+
+5. **Verify in logs:**
+```bash
+# Check server logs for:
+stripe.webhook received type=payment_intent.succeeded verified=true
+
+# Check database:
+psql unleak_poc -c "SELECT * FROM stripe_events ORDER BY created_at DESC LIMIT 5;"
+```
+
+---
+
+### Security & Redaction
+
+**Sensitive data is NEVER logged in clear text:**
+
+- ✅ Emails redacted: `user@example.com` → `***@example.com`
+- ✅ Stripe keys redacted: `sk_test_abc123` → `sk_***`
+- ✅ Webhook secrets redacted: `whsec_abc123` → `whsec_***`
+- ✅ Authorization headers redacted: `Bearer abc123` → `Bearer ***`
+
+**Redaction helper:** `src/utils/redact.ts`
+
+**Example logs:**
+```
+stripe.mock_intent ok plan=premium
+stripe.webhook received type=invoice.paid verified=true
+```
+
+**No emails, no keys, no Authorization headers in logs.**
+
+---
+
+### Safety Features
+
+- ✅ **Flag-gated:** `STRIPE_LITE_ENABLED=false` by default
+- ✅ **NO real charges:** Mock IDs only
+- ✅ **NO customer creation:** Audit logging only
+- ✅ **NO subscriptions:** Test mode only
+- ✅ **Webhook always returns 200:** Prevents retry storms
+- ✅ **PII redaction:** Emails/keys never logged in clear
+- ✅ **Signature verification:** Optional via `STRIPE_WEBHOOK_SECRET`
+
+---
+
+### Artifacts Structure
+
+**New in Day-6:** Artifacts are organized with URL hashing for better organization:
+
+```
+artifacts/
+├── <runId>/
+│   ├── <findingId>/
+│   │   ├── <url-hash>/          # NEW: 8-char MD5 hash of URL
+│   │   │   ├── screenshot.png
+│   │   │   ├── page.html
+│   │   │   ├── trace.har
+│   │   │   └── console.json
+```
+
+**Benefits:**
+- Multiple findings from same run + URL don't collide
+- Easier to find artifacts for specific URLs
+- Backwards compatible with old flat structure
+
+**API Response includes full paths:**
+```bash
+curl http://localhost:8000/api/admin/runs/{runId}
+```
+
+Response includes artifact paths:
+```json
+{
+  "run": { "id": "...", "status": "completed" },
+  "findings": [
+    {
+      "id": "finding-123",
+      "url": "https://example.com",
+      "artifacts": [
+        {
+          "id": "artifact-456",
+          "type": "screenshot",
+          "storageUrl": "runId/findingId/a1b2c3d4/screenshot.png",
+          "fullPath": "artifacts/runId/findingId/a1b2c3d4/screenshot.png",
+          "absolutePath": "/path/to/project/artifacts/runId/findingId/a1b2c3d4/screenshot.png"
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Tuning & Configuration
+
+**New Configurable Thresholds:**
+
+```bash
+# In .env file
+
+# robots.txt cache duration (seconds)
+ROBOTS_CACHE_TTL_SECONDS=600  # Default: 10 minutes
+
+# Latency threshold for slow request warnings (milliseconds)
+LATENCY_MS_THRESHOLD=1500     # Default: 1.5 seconds
+```
+
+**Circuit Breaker Logging:**
+Improved logging with concise single-line state transitions:
+
+```
+[Breaker] example.com: closed → open (5 failures, 20m window)
+[Breaker] example.com: open (20m window until 2025-10-24T11:00:00Z)
+[Breaker] example.com: open → half_open (probe)
+[Breaker] example.com: half_open → closed (probe succeeded)
+[Breaker] example.com: half_open → open (probe failed, extended cooldown)
 ```
 
 ---

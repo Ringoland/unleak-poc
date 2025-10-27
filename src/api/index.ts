@@ -5,6 +5,7 @@ import runsRouter from './routes/runs';
 import adminRouter from './routes/admin';
 import { adminAuth } from './middleware/adminAuth';
 import { config } from '../config';
+import stripeRouter from './routes/stripe';
 
 const router: Router = Router();
 
@@ -13,6 +14,7 @@ router.use('/findings', findingsRouter);
 router.use('/slack', slackRouter);
 router.use('/runs', runsRouter); // Canonical public entry point
 router.use('/scan', runsRouter); // Internal alias - delegates to same handler
+router.use('/stripe', stripeRouter);
 
 // Only mount admin routes when admin is enabled
 if (config.admin.enabled) {

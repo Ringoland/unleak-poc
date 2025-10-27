@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import crypto from 'crypto';
 import { logger } from '../utils/logger';
 
 export type ArtifactType = 'screenshot' | 'har' | 'html' | 'console_logs';
@@ -21,31 +22,45 @@ export class StorageService {
   }
 
   /**
-   * Get the directory path for a specific finding
-   * Structure: artifacts/<runId>/<findingId>/
+   * Generate a short hash from a URL for directory naming
    */
-  private getFindingDir(runId: string, findingId: string): string {
+  private hashUrl(url: string): string {
+    return crypto.createHash('md5').update(url).digest('hex').substring(0, 8);
+  }
+
+  /**
+   * Get the directory path for a specific finding
+   * New structure: artifacts/<runId>/<findingId>/<url-hash>/
+   * Backwards compatible: falls back to artifacts/<runId>/<findingId>/
+   */
+  private getFindingDir(runId: string, findingId: string, url?: string): string {
+    if (url) {
+      const urlHash = this.hashUrl(url);
+      return path.join(this.baseDir, runId, findingId, urlHash);
+    }
+    // Backwards compatible fallback
     return path.join(this.baseDir, runId, findingId);
   }
 
   /**
    * Ensure the directory exists for a finding
    */
-  private async ensureFindingDir(runId: string, findingId: string): Promise<string> {
-    const dir = this.getFindingDir(runId, findingId);
+  private async ensureFindingDir(runId: string, findingId: string, url?: string): Promise<string> {
+    const dir = this.getFindingDir(runId, findingId, url);
     await fs.mkdir(dir, { recursive: true });
     return dir;
   }
 
   /**
    * Save a screenshot
-   * New structure: artifacts/<runId>/<findingId>/screenshot.png
+   * New structure: artifacts/<runId>/<findingId>/<url-hash>/screenshot.png
+   * Backwards compatible: can save to artifacts/<runId>/<findingId>/screenshot.png if url not provided
    */
-  async saveScreenshot(runId: string, findingId: string, buffer: Buffer): Promise<StorageResult> {
-    const dir = await this.ensureFindingDir(runId, findingId);
+  async saveScreenshot(runId: string, findingId: string, buffer: Buffer, url?: string): Promise<StorageResult> {
+    const dir = await this.ensureFindingDir(runId, findingId, url);
     const filename = 'screenshot.png';
     const fullPath = path.join(dir, filename);
-    const relativePath = path.join(runId, findingId, filename);
+    const relativePath = path.relative(this.baseDir, fullPath);
 
     await fs.writeFile(fullPath, buffer);
     const stats = await fs.stat(fullPath);
@@ -60,13 +75,14 @@ export class StorageService {
 
   /**
    * Save HAR file (HTTP Archive)
-   * New structure: artifacts/<runId>/<findingId>/trace.har
+   * New structure: artifacts/<runId>/<findingId>/<url-hash>/trace.har
+   * Backwards compatible: can save to artifacts/<runId>/<findingId>/trace.har if url not provided
    */
-  async saveHAR(runId: string, findingId: string, harData: any): Promise<StorageResult> {
-    const dir = await this.ensureFindingDir(runId, findingId);
+  async saveHAR(runId: string, findingId: string, harData: any, url?: string): Promise<StorageResult> {
+    const dir = await this.ensureFindingDir(runId, findingId, url);
     const filename = 'trace.har';
     const fullPath = path.join(dir, filename);
-    const relativePath = path.join(runId, findingId, filename);
+    const relativePath = path.relative(this.baseDir, fullPath);
 
     const harJson = JSON.stringify(harData, null, 2);
     await fs.writeFile(fullPath, harJson, 'utf-8');
@@ -82,13 +98,14 @@ export class StorageService {
 
   /**
    * Save HTML source
-   * New structure: artifacts/<runId>/<findingId>/page.html
+   * New structure: artifacts/<runId>/<findingId>/<url-hash>/page.html
+   * Backwards compatible: can save to artifacts/<runId>/<findingId>/page.html if url not provided
    */
-  async saveHTML(runId: string, findingId: string, html: string): Promise<StorageResult> {
-    const dir = await this.ensureFindingDir(runId, findingId);
+  async saveHTML(runId: string, findingId: string, html: string, url?: string): Promise<StorageResult> {
+    const dir = await this.ensureFindingDir(runId, findingId, url);
     const filename = 'page.html';
     const fullPath = path.join(dir, filename);
-    const relativePath = path.join(runId, findingId, filename);
+    const relativePath = path.relative(this.baseDir, fullPath);
 
     await fs.writeFile(fullPath, html, 'utf-8');
     const stats = await fs.stat(fullPath);
@@ -103,13 +120,14 @@ export class StorageService {
 
   /**
    * Save console logs
-   * New structure: artifacts/<runId>/<findingId>/console.json
+   * New structure: artifacts/<runId>/<findingId>/<url-hash>/console.json
+   * Backwards compatible: can save to artifacts/<runId>/<findingId>/console.json if url not provided
    */
-  async saveConsoleLogs(runId: string, findingId: string, logs: any[]): Promise<StorageResult> {
-    const dir = await this.ensureFindingDir(runId, findingId);
+  async saveConsoleLogs(runId: string, findingId: string, logs: any[], url?: string): Promise<StorageResult> {
+    const dir = await this.ensureFindingDir(runId, findingId, url);
     const filename = 'console.json';
     const fullPath = path.join(dir, filename);
-    const relativePath = path.join(runId, findingId, filename);
+    const relativePath = path.relative(this.baseDir, fullPath);
 
     const logsJson = JSON.stringify(logs, null, 2);
     await fs.writeFile(fullPath, logsJson, 'utf-8');

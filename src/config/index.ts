@@ -56,4 +56,16 @@ export const config = {
   // External services
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || '',
   stripeApiKey: process.env.STRIPE_API_KEY || '',
+
+  // Stripe Lite configuration
+  stripeLite: {
+    enabled: process.env.STRIPE_LITE_ENABLED === 'true',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+  },
+
+  // Tuning & Performance Thresholds
+  tuning: {
+    robotsCacheTtlSeconds: parseInt(process.env.ROBOTS_CACHE_TTL_SECONDS || '600', 10),
+    latencyMsThreshold: parseInt(process.env.LATENCY_MS_THRESHOLD || '1500', 10),
+  },
 };
