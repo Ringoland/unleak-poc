@@ -157,6 +157,17 @@ export const queueJobDurationHistogram = new Histogram({
   registers: [metricsRegistry],
 });
 
+/**
+ * Reverify request latency
+ */
+export const reverifyLatencyHistogram = new Histogram({
+  name: 'unleak_reverify_latency_ms',
+  help: 'Reverify request processing latency in milliseconds',
+  labelNames: ['result'],
+  buckets: [10, 50, 100, 200, 500, 1000, 2000, 5000],
+  registers: [metricsRegistry],
+});
+
 // ===== Gauges =====
 
 /**
@@ -255,9 +266,12 @@ export function recordSlackAlert(alertType: string): void {
 /**
  * Record a re-verify request
  */
-export function recordReverifyRequest(status: string): void {
+export function recordReverifyRequest(status: string, latencyMs?: number): void {
   try {
     reverifyRequestsCounter.labels(status).inc();
+    if (latencyMs !== undefined) {
+      reverifyLatencyHistogram.labels(status).observe(latencyMs);
+    }
   } catch (error) {
     logger.error('[Metrics] Error recording reverify request', { error });
   }

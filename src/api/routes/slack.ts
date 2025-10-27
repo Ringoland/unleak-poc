@@ -1,95 +1,90 @@
 import { Router, Request, Response } from 'express';
 import { logger } from '../../utils/logger';
 import { getRedisClient } from '../../config/redis';
+import { reverifyFinding } from '../../services/reverifyService';
+import { sendSlackMessage } from '../../services/slackService';
 
 const router: Router = Router();
 
-// In-memory muted findings store (could be moved to Redis/DB for persistence)
-const mutedFindings = new Set<string>();
-
 // POST /api/slack/actions - Handle Slack action button clicks
+// Accepts { action: 'reverify' | 'suppress24h', findingId: string }
 router.post('/actions', async (req: Request, res: Response) => {
   try {
-    const { act, findingId } = req.query;
+    const { action, findingId } = req.body;
 
-    if (!act || !findingId) {
+    if (!action || !findingId) {
       return res.status(400).json({
-        error: 'Missing required query parameters',
-        required: ['act', 'findingId'],
+        ok: false,
+        error: 'Missing required fields: action and findingId',
       });
     }
 
-    const action = String(act);
-    const finding = String(findingId);
-
-    logger.info(`[Slack] Action received: ${action} for finding ${finding}`);
+    logger.info(`[Slack] Action received: ${action} for finding ${findingId}`);
 
     switch (action) {
-      case 'ack': {
-        // Acknowledge the alert
-        const redis = getRedisClient();
-        const ackKey = `slack:ack:${finding}`;
-        
-        await redis.setex(ackKey, 86400, new Date().toISOString()); // 24 hour expiry
-        
-        logger.info(`[Slack] Finding ${finding} acknowledged`);
-        
+      case 'reverify': {
+        // Call Re-verify API
+        const result = await reverifyFinding({
+          findingId,
+          ip: req.ip,
+          userAgent: req.get('user-agent'),
+          source: 'slack',
+        });
+
+        // Update Slack thread with result
+        let message = '';
+        if (result.ok && result.result === 'ok') {
+          message = `✅ Re-verify request accepted for finding \`${findingId}\`\nJob ID: \`${result.jobId}\`\nRemaining attempts: ${result.remainingAttempts}/5 per hour`;
+        } else if (result.result === 'duplicate') {
+          message = `ℹ️ Re-verify already in progress for finding \`${findingId}\`\nJob ID: \`${result.jobId}\` (duplicate within 120s window)`;
+        } else if (result.result === 'rate_limited') {
+          message = `⚠️ Rate limit exceeded for finding \`${findingId}\`\nMax 5 requests per hour. Please try again later.`;
+        } else {
+          message = `❌ Re-verify failed for finding \`${findingId}\`: ${result.message}`;
+        }
+
+        // Send update to Slack
+        await sendSlackMessage(message);
+
         return res.json({
-          ok: true,
-          action: 'ack',
-          findingId: finding,
-          message: 'Alert acknowledged',
-          acknowledgedAt: new Date().toISOString(),
+          ok: result.ok,
+          action: 'reverify',
+          findingId,
+          result: result.result,
+          jobId: result.jobId,
+          message,
         });
       }
 
-      case 'mute': {
-        // Mute further alerts for this finding
-        mutedFindings.add(finding);
-        
+      case 'suppress24h': {
+        // Insert/update a rule for the finding's fingerprint with 24h TTL
         const redis = getRedisClient();
-        const muteKey = `slack:mute:${finding}`;
+        const suppressKey = `suppress:${findingId}`;
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
         
-        // Mute for 1 hour
-        await redis.setex(muteKey, 3600, new Date().toISOString());
+        await redis.setex(suppressKey, 86400, expiresAt); // 24 hours
         
-        logger.info(`[Slack] Finding ${finding} muted for 1 hour`);
+        logger.info(`[Slack] Finding ${findingId} suppressed for 24h until ${expiresAt}`);
+        
+        // Send confirmation to Slack
+        const message = `🔇 Finding \`${findingId}\` suppressed for 24 hours\nExpires: ${expiresAt}`;
+        await sendSlackMessage(message);
         
         return res.json({
           ok: true,
-          action: 'mute',
-          findingId: finding,
-          message: 'Alerts muted for 1 hour',
-          mutedAt: new Date().toISOString(),
-          mutedUntil: new Date(Date.now() + 3600000).toISOString(),
-        });
-      }
-
-      case 'unmute': {
-        // Unmute alerts for this finding
-        mutedFindings.delete(finding);
-        
-        const redis = getRedisClient();
-        const muteKey = `slack:mute:${finding}`;
-        
-        await redis.del(muteKey);
-        
-        logger.info(`[Slack] Finding ${finding} unmuted`);
-        
-        return res.json({
-          ok: true,
-          action: 'unmute',
-          findingId: finding,
-          message: 'Alerts unmuted',
-          unmutedAt: new Date().toISOString(),
+          action: 'suppress24h',
+          findingId,
+          message: 'Finding suppressed for 24 hours',
+          expiresAt,
         });
       }
 
       default:
         return res.status(400).json({
+          ok: false,
           error: 'Invalid action',
           action,
-          validActions: ['ack', 'mute', 'unmute'],
+          validActions: ['reverify', 'suppress24h'],
         });
     }
   } catch (error) {
@@ -98,62 +93,26 @@ router.post('/actions', async (req: Request, res: Response) => {
     });
     
     return res.status(500).json({
+      ok: false,
       error: 'Internal server error',
       message: error instanceof Error ? error.message : String(error),
     });
   }
 });
 
-// GET /api/slack/actions/status - Check if a finding is muted or acknowledged
-router.get('/actions/status', async (req: Request, res: Response) => {
-  try {
-    const { findingId } = req.query;
-
-    if (!findingId) {
-      return res.status(400).json({
-        error: 'Missing findingId query parameter',
-      });
-    }
-
-    const finding = String(findingId);
-    const redis = getRedisClient();
-
-    const [ackTime, muteTime] = await Promise.all([
-      redis.get(`slack:ack:${finding}`),
-      redis.get(`slack:mute:${finding}`),
-    ]);
-
-    return res.json({
-      findingId: finding,
-      isAcknowledged: !!ackTime,
-      acknowledgedAt: ackTime,
-      isMuted: !!muteTime,
-      mutedAt: muteTime,
-    });
-  } catch (error) {
-    logger.error('[Slack] Error checking status', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    
-    return res.status(500).json({
-      error: 'Internal server error',
-    });
-  }
-});
-
 /**
- * Helper function to check if a finding is muted
+ * Helper function to check if a finding is suppressed
  * Can be imported and used before sending Slack alerts
  */
-export async function isFindingMuted(findingId: string): Promise<boolean> {
+export async function isFindingSuppressed(findingId: string): Promise<boolean> {
   try {
     const redis = getRedisClient();
-    const muteKey = `slack:mute:${findingId}`;
-    const muteTime = await redis.get(muteKey);
-    return !!muteTime;
+    const suppressKey = `suppress:${findingId}`;
+    const suppressed = await redis.get(suppressKey);
+    return !!suppressed;
   } catch (error) {
-    logger.error('[Slack] Error checking mute status', { findingId, error });
-    return false; // Default to not muted on error
+    logger.error('[Slack] Error checking suppress status', { findingId, error });
+    return false; // Default to not suppressed on error
   }
 }
 

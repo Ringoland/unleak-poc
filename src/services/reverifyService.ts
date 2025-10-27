@@ -1,0 +1,217 @@
+import { db } from '../db';
+import { findings, reverifyAttempts, NewReverifyAttempt } from '../db/schema';
+import { eq } from 'drizzle-orm';
+import { getRedisClient } from '../config/redis';
+import { logger } from '../utils/logger';
+import { recordReverifyRequest } from '../utils/metrics';
+import { randomUUID } from 'crypto';
+
+const IDEMPOTENCY_TTL_SECONDS = 120;
+const RATE_LIMIT_WINDOW_SECONDS = 3600; // 1 hour
+const RATE_LIMIT_MAX_REQUESTS = 5;
+
+export interface ReverifyRequest {
+  findingId: string;
+  ip?: string;
+  userAgent?: string;
+  source: 'slack' | 'api';
+}
+
+export interface ReverifyResponse {
+  ok: boolean;
+  result: 'ok' | 'duplicate' | 'rate_limited' | 'not_found';
+  jobId?: string;
+  message?: string;
+  remainingAttempts?: number;
+}
+
+/**
+ * Check if a reverify request is a duplicate within the idempotency window
+ */
+async function checkIdempotency(findingId: string): Promise<string | null> {
+  try {
+    const redis = getRedisClient();
+    const key = `reverify:idempotency:${findingId}`;
+    const existingJobId = await redis.get(key);
+    return existingJobId;
+  } catch (error) {
+    logger.error('reverify.idempotency_check_failed', { error, findingId });
+    return null;
+  }
+}
+
+/**
+ * Set idempotency lock for a finding
+ */
+async function setIdempotency(findingId: string, jobId: string): Promise<void> {
+  try {
+    const redis = getRedisClient();
+    const key = `reverify:idempotency:${findingId}`;
+    await redis.setex(key, IDEMPOTENCY_TTL_SECONDS, jobId);
+  } catch (error) {
+    logger.error('reverify.idempotency_set_failed', { error, findingId, jobId });
+  }
+}
+
+/**
+ * Check rate limit for a finding
+ * Returns remaining attempts, or 0 if rate limited
+ */
+async function checkRateLimit(findingId: string): Promise<number> {
+  try {
+    const redis = getRedisClient();
+    const key = `reverify:count:${findingId}`;
+    const count = await redis.incr(key);
+    
+    // Set expiry on first increment
+    if (count === 1) {
+      await redis.expire(key, RATE_LIMIT_WINDOW_SECONDS);
+    }
+
+    const remaining = Math.max(0, RATE_LIMIT_MAX_REQUESTS - count);
+    return remaining;
+  } catch (error) {
+    logger.error('reverify.rate_limit_check_failed', { error, findingId });
+    // Fail open - allow request if Redis fails
+    return RATE_LIMIT_MAX_REQUESTS;
+  }
+}
+
+/**
+ * Record a reverify attempt in the database
+ */
+async function recordAttempt(attempt: NewReverifyAttempt): Promise<void> {
+  try {
+    await db.insert(reverifyAttempts).values(attempt);
+  } catch (error) {
+    logger.error('reverify.record_attempt_failed', { error, attempt });
+  }
+}
+
+/**
+ * Reverify a finding by re-scanning the URL
+ * Implements idempotency and rate limiting
+ */
+export async function reverifyFinding(request: ReverifyRequest): Promise<ReverifyResponse> {
+  const { findingId, ip, userAgent, source } = request;
+  const startTime = Date.now();
+
+  try {
+    // Check if finding exists
+    const [finding] = await db
+      .select()
+      .from(findings)
+      .where(eq(findings.id, findingId))
+      .limit(1);
+
+    if (!finding) {
+      logger.warn('reverify.not_found', { findingId });
+      recordReverifyRequest('not_found', Date.now() - startTime);
+      return {
+        ok: false,
+        result: 'not_found',
+        message: 'Finding not found',
+      };
+    }
+
+    // Check idempotency - duplicate request within 120s window
+    const existingJobId = await checkIdempotency(findingId);
+    if (existingJobId) {
+      logger.info('reverify.duplicate', { findingId, existingJobId });
+      
+      await recordAttempt({
+        findingId,
+        jobId: existingJobId,
+        ip,
+        userAgent,
+        source,
+        result: 'duplicate',
+      });
+
+      recordReverifyRequest('duplicate', Date.now() - startTime);
+      return {
+        ok: true,
+        result: 'duplicate',
+        jobId: existingJobId,
+        message: 'Request already in progress (duplicate within 120s window)',
+      };
+    }
+
+    // Check rate limit - max 5 per hour
+    const remaining = await checkRateLimit(findingId);
+    if (remaining === 0) {
+      logger.warn('reverify.rate_limited', { findingId });
+      
+      await recordAttempt({
+        findingId,
+        ip,
+        userAgent,
+        source,
+        result: 'rate_limited',
+      });
+
+      recordReverifyRequest('rate_limited', Date.now() - startTime);
+      return {
+        ok: false,
+        result: 'rate_limited',
+        message: 'Rate limit exceeded (max 5 requests per hour)',
+        remainingAttempts: 0,
+      };
+    }
+
+    // Generate job ID and set idempotency lock
+    const jobId = randomUUID();
+    await setIdempotency(findingId, jobId);
+
+    // Record the attempt
+    await recordAttempt({
+      findingId,
+      jobId,
+      ip,
+      userAgent,
+      source,
+      result: 'ok',
+    });
+
+    // TODO: Enqueue re-scan job to the scan queue
+    // For now, we'll log the intent
+    logger.info('reverify.ok', {
+      findingId,
+      jobId,
+      url: finding.url,
+      source,
+      remainingAttempts: remaining - 1,
+    });
+
+    recordReverifyRequest('ok', Date.now() - startTime);
+    return {
+      ok: true,
+      result: 'ok',
+      jobId,
+      message: 'Re-verify request accepted',
+      remainingAttempts: remaining - 1,
+    };
+  } catch (error) {
+    logger.error('reverify.error', { error, findingId });
+    recordReverifyRequest('error', Date.now() - startTime);
+    throw error;
+  }
+}
+
+/**
+ * Get reverify attempts for a finding
+ */
+export async function getReverifyAttempts(findingId: string) {
+  try {
+    const attempts = await db
+      .select()
+      .from(reverifyAttempts)
+      .where(eq(reverifyAttempts.findingId, findingId))
+      .orderBy(reverifyAttempts.requestedAt);
+
+    return attempts;
+  } catch (error) {
+    logger.error('reverify.get_attempts_failed', { error, findingId });
+    return [];
+  }
+}

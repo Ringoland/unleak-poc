@@ -1,64 +1,63 @@
 import { Router, Request, Response } from 'express';
-import { getRedisClient } from '../../config/redis';
-import { recordReverifyRequest } from '../../utils/metrics';
+import { reverifyFinding, getReverifyAttempts } from '../../services/reverifyService';
+import { logger } from '../../utils/logger';
 
 const router: Router = Router();
 
-// POST /api/findings/:id/reverify - Reverify a finding
+/**
+ * POST /api/findings/:id/reverify
+ * Reverify a finding by re-scanning the URL
+ * Implements idempotency (120s TTL) and rate limiting (5/hour)
+ */
 router.post('/:id/reverify', async (req: Request, res: Response) => {
   const findingId = req.params.id;
-  const idempotencyKey = req.headers['idempotency-key'] as string;
-
-  if (!idempotencyKey) {
-    return res.status(400).json({ error: 'Idempotency-Key header required' });
-  }
+  const ip = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress;
+  const userAgent = req.headers['user-agent'];
+  const source = req.body.source || 'api';
 
   try {
-    const redis = getRedisClient();
-    const ttl = 120; // 120 seconds TTL
+    const result = await reverifyFinding({
+      findingId,
+      ip,
+      userAgent,
+      source: source === 'slack' ? 'slack' : 'api',
+    });
 
-    // Check if this idempotency key was already used
-    const keyName = `reverify:${idempotencyKey}`;
-    const existing = await redis.get(keyName);
-
-    if (existing) {
-      const ttlSeconds = await redis.ttl(keyName);
-      recordReverifyRequest('duplicate_ttl');
-      return res.json({
-        id: findingId,
-        reverifyStatus: 'duplicate_ttl',
-        error: 'duplicate_ttl',
-        ttlSecondsRemaining: Math.max(0, ttlSeconds),
-      });
+    if (result.result === 'not_found') {
+      return res.status(404).json(result);
     }
 
-    // Check rate limit for this finding
-    const rateLimitKey = `reverify:rate:${findingId}`;
-    const requestCount = await redis.incr(rateLimitKey);
-
-    if (requestCount === 1) {
-      await redis.expire(rateLimitKey, 3600); // 1 hour window
+    if (result.result === 'rate_limited') {
+      return res.status(429).json(result);
     }
 
-    const rateLimit = 5; // 5 requests per hour
-    if (requestCount > rateLimit) {
-      recordReverifyRequest('rate_limited');
-      return res.status(429).json({
-        id: findingId,
-        reverifyStatus: 'rate_limited',
-      });
-    }
+    return res.json(result);
+  } catch (error) {
+    logger.error('reverify.endpoint_error', { error, findingId });
+    return res.status(500).json({
+      ok: false,
+      result: 'error',
+      message: 'Internal server error',
+    });
+  }
+});
 
-    // Store idempotency key
-    await redis.setex(`reverify:${idempotencyKey}`, ttl, findingId);
+/**
+ * GET /api/findings/:id/reverify-attempts
+ * Get all reverify attempts for a finding
+ */
+router.get('/:id/reverify-attempts', async (req: Request, res: Response) => {
+  const findingId = req.params.id;
 
-    // Process reverification (placeholder)
-    recordReverifyRequest('accepted');
+  try {
+    const attempts = await getReverifyAttempts(findingId);
     return res.json({
-      id: findingId,
-      reverifyStatus: 'accepted',
+      findingId,
+      attempts,
+      total: attempts.length,
     });
   } catch (error) {
+    logger.error('reverify.get_attempts_error', { error, findingId });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
