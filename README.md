@@ -183,6 +183,10 @@ curl -X POST http://localhost:8000/api/runs \
 
 **View queue dashboard:**
 ```
+# Enable admin routes first
+ADMIN_ENABLED=true
+
+# Then access:
 Open: http://localhost:8000/admin/queues
 Login: admin / admin (change in .env)
 ```

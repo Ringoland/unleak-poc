@@ -89,12 +89,18 @@ async function startServer() {
       defaultRetries: parseInt(process.env.FETCHER_RETRIES || '3'),
     });
     logger.info('Fetcher service initialized');
-    try {
-      initializeBullBoard();
-      app.use('/admin/queues', bullBoardAuth, getBullBoardAdapter().getRouter());
-      logger.info('Bull Board dashboard available at /admin/queues');
-    } catch (error) {
-      logger.error('Failed to initialize Bull Board:', error);
+    
+    // Only initialize Bull Board when admin is enabled
+    if (config.admin.enabled) {
+      try {
+        initializeBullBoard();
+        app.use('/admin/queues', bullBoardAuth, getBullBoardAdapter().getRouter());
+        logger.info('Bull Board dashboard available at /admin/queues');
+      } catch (error) {
+        logger.error('Failed to initialize Bull Board:', error);
+      }
+    } else {
+      logger.info('Bull Board dashboard disabled (ADMIN_ENABLED=false)');
     }
 
     // Start Express server

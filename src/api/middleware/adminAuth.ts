@@ -4,15 +4,10 @@ import { logger } from '../../utils/logger';
 
 /**
  * Basic authentication middleware for /admin/* routes.
- * Only enforced if ADMIN_ENABLED=true.
+ * This middleware only runs when admin routes are mounted (ADMIN_ENABLED=true).
  * Uses BULL_BOARD_USERNAME and BULL_BOARD_PASSWORD from config.
  */
 export function adminAuth(req: Request, res: Response, next: NextFunction): void {
-  // If admin auth is disabled, allow all requests
-  if (!config.admin.enabled) {
-    return next();
-  }
-
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Basic ')) {

@@ -3,17 +3,6 @@ import { config } from '../../config';
 import { logger } from '../../utils/logger';
 
 export function bullBoardAuth(req: Request, res: Response, next: NextFunction) {
-  // If admin auth is disabled, allow all requests
-  if (!config.admin.enabled) {
-    return next();
-  }
-
-  // Skip auth in development if credentials are not set and ADMIN_ENABLED is false
-  if (process.env.NODE_ENV === 'development' && !process.env.BULL_BOARD_PASSWORD && !config.admin.enabled) {
-    logger.warn('Bull Board authentication disabled in development mode');
-    return next();
-  }
-
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Basic ')) {
