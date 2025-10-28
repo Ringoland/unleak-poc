@@ -5,6 +5,7 @@ import { getRedisClient } from '../config/redis';
 import { logger } from '../utils/logger';
 import { recordReverifyRequest } from '../utils/metrics';
 import { randomUUID } from 'crypto';
+import { createSafeLogMetadata } from '../utils/redact';
 
 const IDEMPOTENCY_TTL_SECONDS = 120;
 const RATE_LIMIT_WINDOW_SECONDS = 3600; // 1 hour
@@ -35,7 +36,10 @@ async function checkIdempotency(findingId: string): Promise<string | null> {
     const existingJobId = await redis.get(key);
     return existingJobId;
   } catch (error) {
-    logger.error('reverify.idempotency_check_failed', { error, findingId });
+    logger.error('reverify.idempotency_check_failed', createSafeLogMetadata({ 
+      error: error instanceof Error ? error.message : String(error),
+      findingId,
+    }));
     return null;
   }
 }
@@ -49,7 +53,11 @@ async function setIdempotency(findingId: string, jobId: string): Promise<void> {
     const key = `reverify:idempotency:${findingId}`;
     await redis.setex(key, IDEMPOTENCY_TTL_SECONDS, jobId);
   } catch (error) {
-    logger.error('reverify.idempotency_set_failed', { error, findingId, jobId });
+    logger.error('reverify.idempotency_set_failed', createSafeLogMetadata({ 
+      error: error instanceof Error ? error.message : String(error),
+      findingId,
+      jobId,
+    }));
   }
 }
 
@@ -71,7 +79,10 @@ async function checkRateLimit(findingId: string): Promise<number> {
     const remaining = Math.max(0, RATE_LIMIT_MAX_REQUESTS - count);
     return remaining;
   } catch (error) {
-    logger.error('reverify.rate_limit_check_failed', { error, findingId });
+    logger.error('reverify.rate_limit_check_failed', createSafeLogMetadata({ 
+      error: error instanceof Error ? error.message : String(error),
+      findingId,
+    }));
     // Fail open - allow request if Redis fails
     return RATE_LIMIT_MAX_REQUESTS;
   }
@@ -84,7 +95,10 @@ async function recordAttempt(attempt: NewReverifyAttempt): Promise<void> {
   try {
     await db.insert(reverifyAttempts).values(attempt);
   } catch (error) {
-    logger.error('reverify.record_attempt_failed', { error, attempt });
+    logger.error('reverify.record_attempt_failed', createSafeLogMetadata({ 
+      error: error instanceof Error ? error.message : String(error),
+      attempt,
+    }));
   }
 }
 
@@ -105,7 +119,7 @@ export async function reverifyFinding(request: ReverifyRequest): Promise<Reverif
       .limit(1);
 
     if (!finding) {
-      logger.warn('reverify.not_found', { findingId });
+      logger.warn('reverify.not_found', createSafeLogMetadata({ findingId }));
       recordReverifyRequest('not_found', Date.now() - startTime);
       return {
         ok: false,
@@ -117,7 +131,7 @@ export async function reverifyFinding(request: ReverifyRequest): Promise<Reverif
     // Check idempotency - duplicate request within 120s window
     const existingJobId = await checkIdempotency(findingId);
     if (existingJobId) {
-      logger.info('reverify.duplicate', { findingId, existingJobId });
+      logger.info('reverify.duplicate', createSafeLogMetadata({ findingId, existingJobId }));
       
       await recordAttempt({
         findingId,
@@ -140,7 +154,7 @@ export async function reverifyFinding(request: ReverifyRequest): Promise<Reverif
     // Check rate limit - max 5 per hour
     const remaining = await checkRateLimit(findingId);
     if (remaining === 0) {
-      logger.warn('reverify.rate_limited', { findingId });
+      logger.warn('reverify.rate_limited', createSafeLogMetadata({ findingId }));
       
       await recordAttempt({
         findingId,
@@ -175,13 +189,13 @@ export async function reverifyFinding(request: ReverifyRequest): Promise<Reverif
 
     // TODO: Enqueue re-scan job to the scan queue
     // For now, we'll log the intent
-    logger.info('reverify.ok', {
+    logger.info('reverify.ok', createSafeLogMetadata({
       findingId,
       jobId,
       url: finding.url,
       source,
       remainingAttempts: remaining - 1,
-    });
+    }));
 
     recordReverifyRequest('ok', Date.now() - startTime);
     return {
@@ -192,7 +206,10 @@ export async function reverifyFinding(request: ReverifyRequest): Promise<Reverif
       remainingAttempts: remaining - 1,
     };
   } catch (error) {
-    logger.error('reverify.error', { error, findingId });
+    logger.error('reverify.error', createSafeLogMetadata({ 
+      error: error instanceof Error ? error.message : String(error),
+      findingId,
+    }));
     recordReverifyRequest('error', Date.now() - startTime);
     throw error;
   }
@@ -211,7 +228,10 @@ export async function getReverifyAttempts(findingId: string) {
 
     return attempts;
   } catch (error) {
-    logger.error('reverify.get_attempts_failed', { error, findingId });
+    logger.error('reverify.get_attempts_failed', createSafeLogMetadata({ 
+      error: error instanceof Error ? error.message : String(error),
+      findingId,
+    }));
     return [];
   }
 }
