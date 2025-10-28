@@ -63,20 +63,31 @@ async function setIdempotency(findingId: string, jobId: string): Promise<void> {
 
 /**
  * Check rate limit for a finding
- * Returns remaining attempts, or 0 if rate limited
+ * Spec: Allow ≤5 requests per hour (allow 1-5, block 6th+)
+ * Returns remaining attempts after this request, or -1 if rate limited
  */
 async function checkRateLimit(findingId: string): Promise<number> {
   try {
     const redis = getRedisClient();
     const key = `reverify:count:${findingId}`;
-    const count = await redis.incr(key);
+    
+    // Get current count BEFORE incrementing
+    const currentCount = parseInt((await redis.get(key)) || '0', 10);
+    
+    // Check if already at limit (5 requests already made)
+    if (currentCount >= RATE_LIMIT_MAX_REQUESTS) {
+      return -1; // Rate limited
+    }
+    
+    // Increment and set expiry
+    const newCount = await redis.incr(key);
     
     // Set expiry on first increment
-    if (count === 1) {
+    if (newCount === 1) {
       await redis.expire(key, RATE_LIMIT_WINDOW_SECONDS);
     }
 
-    const remaining = Math.max(0, RATE_LIMIT_MAX_REQUESTS - count);
+    const remaining = Math.max(0, RATE_LIMIT_MAX_REQUESTS - newCount);
     return remaining;
   } catch (error) {
     logger.error('reverify.rate_limit_check_failed', createSafeLogMetadata({ 
@@ -151,9 +162,9 @@ export async function reverifyFinding(request: ReverifyRequest): Promise<Reverif
       };
     }
 
-    // Check rate limit - max 5 per hour
+    // Check rate limit - max 5 per hour (allow 1-5, block 6+)
     const remaining = await checkRateLimit(findingId);
-    if (remaining === 0) {
+    if (remaining === -1) {
       logger.warn('reverify.rate_limited', createSafeLogMetadata({ findingId }));
       
       await recordAttempt({
@@ -194,7 +205,7 @@ export async function reverifyFinding(request: ReverifyRequest): Promise<Reverif
       jobId,
       url: finding.url,
       source,
-      remainingAttempts: remaining - 1,
+      remainingAttempts: remaining,
     }));
 
     recordReverifyRequest('ok', Date.now() - startTime);
@@ -203,7 +214,7 @@ export async function reverifyFinding(request: ReverifyRequest): Promise<Reverif
       result: 'ok',
       jobId,
       message: 'Re-verify request accepted',
-      remainingAttempts: remaining - 1,
+      remainingAttempts: remaining,
     };
   } catch (error) {
     logger.error('reverify.error', createSafeLogMetadata({ 
