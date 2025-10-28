@@ -1,70 +1,43 @@
 {
-  "id": "cbdce030-2ae6-4216-a109-630e18779323",
+  "id": "6a2b82c6-65bc-4399-9e4c-c153705bf49a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.breaker_states": {
-      "name": "breaker_states",
+    "public.artifacts": {
+      "name": "artifacts",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "uuid",
           "primaryKey": true,
-          "notNull": true
+          "notNull": true,
+          "default": "gen_random_uuid()"
         },
-        "service_name": {
-          "name": "service_name",
-          "type": "varchar(255)",
+        "finding_id": {
+          "name": "finding_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "state": {
-          "name": "state",
+        "type": {
+          "name": "type",
           "type": "varchar(50)",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'closed'"
+          "notNull": true
         },
-        "failure_count": {
-          "name": "failure_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "opened_at": {
-          "name": "opened_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "next_attempt_at": {
-          "name": "next_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
+        "storage_url": {
+          "name": "storage_url",
           "type": "varchar(1024)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "success_count": {
-          "name": "success_count",
+        "size": {
+          "name": "size",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "is_active": {
-          "name": "is_active",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
+          "notNull": true
         },
         "created_at": {
           "name": "created_at",
@@ -73,26 +46,62 @@
           "notNull": true,
           "default": "now()"
         },
-        "updated_at": {
-          "name": "updated_at",
+        "expires_at": {
+          "name": "expires_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": false
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "breaker_states_service_name_unique": {
-          "name": "breaker_states_service_name_unique",
-          "nullsNotDistinct": false,
+      "indexes": {
+        "artifacts_finding_id_idx": {
+          "name": "artifacts_finding_id_idx",
           "columns": [
-            "service_name"
-          ]
+            {
+              "expression": "finding_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "artifacts_type_idx": {
+          "name": "artifacts_type_idx",
+          "columns": [
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
+      "foreignKeys": {
+        "artifacts_finding_id_findings_id_fk": {
+          "name": "artifacts_finding_id_findings_id_fk",
+          "tableFrom": "artifacts",
+          "tableTo": "findings",
+          "columnsFrom": [
+            "finding_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -350,28 +359,40 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.reverify_keys": {
-      "name": "reverify_keys",
+    "public.stripe_events": {
+      "name": "stripe_events",
       "schema": "",
       "columns": {
-        "idempotency_key": {
-          "name": "idempotency_key",
-          "type": "varchar(255)",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "finding_id": {
-          "name": "finding_id",
+        "id": {
+          "name": "id",
           "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "varchar(100)",
           "primaryKey": false,
           "notNull": true
         },
-        "status": {
-          "name": "status",
+        "payment_id": {
+          "name": "payment_id",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "plan": {
+          "name": "plan",
           "type": "varchar(50)",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'accepted'"
+          "notNull": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
         },
         "created_at": {
           "name": "created_at",
@@ -379,82 +400,26 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
-      "indexes": {
-        "reverify_keys_expires_at_idx": {
-          "name": "reverify_keys_expires_at_idx",
-          "columns": [
-            {
-              "expression": "expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "reverify_keys_finding_id_idx": {
-          "name": "reverify_keys_finding_id_idx",
-          "columns": [
-            {
-              "expression": "finding_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "reverify_keys_finding_id_findings_id_fk": {
-          "name": "reverify_keys_finding_id_findings_id_fk",
-          "tableFrom": "reverify_keys",
-          "tableTo": "findings",
-          "columnsFrom": [
-            "finding_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.reverify_counters": {
-      "name": "reverify_counters",
+    "public.reverify_attempts": {
+      "name": "reverify_attempts",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "uuid",
           "primaryKey": true,
-          "notNull": true
+          "notNull": true,
+          "default": "gen_random_uuid()"
         },
         "finding_id": {
           "name": "finding_id",
@@ -462,28 +427,41 @@
           "primaryKey": false,
           "notNull": true
         },
-        "window_start": {
-          "name": "window_start",
-          "type": "timestamp with time zone",
+        "job_id": {
+          "name": "job_id",
+          "type": "varchar(100)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "window_end": {
-          "name": "window_end",
+        "requested_at": {
+          "name": "requested_at",
           "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_count": {
-          "name": "request_count",
-          "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": "now()"
         },
-        "last_request_at": {
-          "name": "last_request_at",
-          "type": "timestamp with time zone",
+        "ip": {
+          "name": "ip",
+          "type": "varchar(45)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source": {
+          "name": "source",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'api'"
+        },
+        "result": {
+          "name": "result",
+          "type": "varchar(50)",
           "primaryKey": false,
           "notNull": false
         },
@@ -493,63 +471,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
         }
       },
-      "indexes": {
-        "reverify_counters_finding_window_idx": {
-          "name": "reverify_counters_finding_window_idx",
-          "columns": [
-            {
-              "expression": "finding_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "window_start",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "window_end",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "reverify_counters_window_end_idx": {
-          "name": "reverify_counters_window_end_idx",
-          "columns": [
-            {
-              "expression": "window_end",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
-        "reverify_counters_finding_id_findings_id_fk": {
-          "name": "reverify_counters_finding_id_findings_id_fk",
-          "tableFrom": "reverify_counters",
+        "reverify_attempts_finding_id_findings_id_fk": {
+          "name": "reverify_attempts_finding_id_findings_id_fk",
+          "tableFrom": "reverify_attempts",
           "tableTo": "findings",
           "columnsFrom": [
             "finding_id"

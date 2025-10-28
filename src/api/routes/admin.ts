@@ -131,6 +131,7 @@ router.get('/runs/:id', async (req: Request, res: Response) => {
   try {
     const runId = req.params.id;
     const { eq } = await import('drizzle-orm');
+    const { getReverifyAttempts } = await import('../../services/reverifyService');
     
     // Get the run
     const runResult = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -174,6 +175,22 @@ router.get('/runs/:id', async (req: Request, res: Response) => {
 
     const findingsWithArtifacts = Array.from(findingsMap.values());
 
+    // Get reverify attempts for each finding
+    const findingsWithReverify = await Promise.all(
+      findingsWithArtifacts.map(async ({ finding, artifacts: findingArtifacts }) => {
+        const reverifyAttempts = await getReverifyAttempts(finding.id);
+        return {
+          finding,
+          artifacts: findingArtifacts,
+          reverifyAttempts: {
+            count: reverifyAttempts.length,
+            lastAttempt: reverifyAttempts[reverifyAttempts.length - 1],
+            attempts: reverifyAttempts,
+          },
+        };
+      })
+    );
+
     // Check if client wants HTML
     const acceptsHtml = req.accepts('html');
     
@@ -195,7 +212,7 @@ router.get('/runs/:id', async (req: Request, res: Response) => {
       const html = await renderTemplate('run-detail', {
         title: `Run ${runId.slice(0, 8)}`,
         run,
-        findingsWithArtifacts,
+        findingsWithArtifacts: findingsWithReverify,
         statusColors,
       });
       
@@ -206,13 +223,14 @@ router.get('/runs/:id', async (req: Request, res: Response) => {
     // Include full artifact file paths for Day-6 requirements
     return res.json({
       run,
-      findings: findingsWithArtifacts.map(({ finding, artifacts: findingArtifacts }) => ({
+      findings: findingsWithReverify.map(({ finding, artifacts: findingArtifacts, reverifyAttempts }) => ({
         ...finding,
         artifacts: findingArtifacts.map(artifact => ({
           ...artifact,
           fullPath: `artifacts/${artifact.storageUrl}`,
           absolutePath: `${process.cwd()}/artifacts/${artifact.storageUrl}`,
         })),
+        reverifyAttempts,
       })),
     });
   } catch (error) {
@@ -229,16 +247,12 @@ router.get('/runs/:id', async (req: Request, res: Response) => {
 
 /**
  * POST /admin/breaker/reset - Reset circuit breaker state for a specific target
+ * Body (optional): { targetId: string } - defaults to 'global' if not provided
  */
 router.post('/breaker/reset', async (req: Request, res: Response) => {
   try {
-    const { targetId } = req.body;
-
-    if (!targetId) {
-      return res.status(400).json({
-        error: 'targetId is required',
-      });
-    }
+    // Default to 'global' if no targetId provided
+    const targetId = req.body?.targetId || 'global';
 
     const breaker = getBreakerService();
     
@@ -260,6 +274,7 @@ router.post('/breaker/reset', async (req: Request, res: Response) => {
 
     return res.status(500).json({
       error: 'Failed to reset breaker',
+      message: error instanceof Error ? error.message : String(error),
     });
   }
 });

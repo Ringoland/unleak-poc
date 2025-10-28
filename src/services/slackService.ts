@@ -2,31 +2,26 @@ import axios from 'axios';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { recordSlackAlert } from '../utils/metrics';
+import { normalizeError } from '../utils/fingerprint';
 import { getBaseUrl } from '../utils/baseUrl';
 
 export interface SlackAlert {
   findingId: string;
+  runId?: string;
   url: string;
   errorType: '5xx' | 'timeout' | 'latency' | 'network';
   latencyMs?: number;
   status?: number;
   error?: string;
   timestamp?: Date;
-  fingerprint?: string; // Day-4: Optional fingerprint for deduplication
-}
-
-interface SlackButton {
-  type: string;
-  text: {
-    type: string;
-    text: string;
-  };
-  url?: string;
-  value?: string;
+  fingerprint?: string;
+  isFirstSeen?: boolean; // New finding vs duplicate
+  host?: string;
+  path?: string;
 }
 
 /**
- * Send an actionable alert to Slack with Ack | Mute | Re-verify buttons
+ * Send an actionable alert to Slack with Re-verify and Suppress24h buttons
  */
 export async function sendSlackAlert(alert: SlackAlert): Promise<void> {
   const webhookUrl = config.slackWebhookUrl;
@@ -40,128 +35,140 @@ export async function sendSlackAlert(alert: SlackAlert): Promise<void> {
     // Build the base URL for action links
     const baseUrl = process.env.BASE_URL || getBaseUrl();
 
+    // Extract host and path
+    const host = alert.host || new URL(alert.url).hostname;
+    const path = alert.path || new URL(alert.url).pathname;
+
+    // Normalize error message
+    const normalizedError = alert.error ? normalizeError(alert.error) : 'Unknown error';
+
+    // Determine latency bucket
+    let latencyBucket = 'unknown';
+    if (alert.latencyMs) {
+      if (alert.latencyMs < 1000) latencyBucket = '<1s';
+      else if (alert.latencyMs < 3000) latencyBucket = '1-3s';
+      else if (alert.latencyMs < 10000) latencyBucket = '3-10s';
+      else latencyBucket = '>10s';
+    }
+
     // Format error message based on type
     let emoji = '🔴';
     let title = 'Alert';
-    let description = '';
+    let color = '#FF0000';
 
     switch (alert.errorType) {
       case '5xx':
         emoji = '🔥';
-        title = 'Server Error Detected';
-        description = `HTTP ${alert.status} error from ${alert.url}`;
+        title = 'Server Error';
+        color = '#FF4444';
         break;
       case 'timeout':
         emoji = '⏱️';
         title = 'Request Timeout';
-        description = `Request to ${alert.url} timed out after ${alert.latencyMs}ms`;
+        color = '#FFA500';
         break;
       case 'latency':
         emoji = '🐌';
-        title = 'High Latency Detected';
-        description = `Request to ${alert.url} took ${alert.latencyMs}ms (threshold exceeded)`;
+        title = 'High Latency';
+        color = '#FFAA00';
         break;
       case 'network':
         emoji = '🌐';
         title = 'Network Error';
-        description = `Network error accessing ${alert.url}: ${alert.error}`;
+        color = '#FF6600';
         break;
     }
 
-    // Create action buttons
-    const buttons: SlackButton[] = [
-      {
-        type: 'button',
-        text: {
-          type: 'plain_text',
-          text: '✅ Ack',
-        },
-        url: `${baseUrl}/api/slack/actions?act=ack&findingId=${alert.findingId}`,
-      },
-      {
-        type: 'button',
-        text: {
-          type: 'plain_text',
-          text: '🔇 Mute',
-        },
-        url: `${baseUrl}/api/slack/actions?act=mute&findingId=${alert.findingId}`,
-      },
-      {
-        type: 'button',
-        text: {
-          type: 'plain_text',
-          text: '🔄 Re-verify',
-        },
-        url: `${baseUrl}/api/findings/${alert.findingId}/reverify`,
-      },
-    ];
-
-    // Build Slack message payload
+    // Build Slack message payload with Block Kit
     const payload = {
-      text: `${emoji} ${title}`,
-      blocks: [
+      text: `${emoji} ${title} - ${host}${path}`,
+      attachments: [
         {
-          type: 'header',
-          text: {
-            type: 'plain_text',
-            text: `${emoji} ${title}`,
-            emoji: true,
-          },
-        },
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: description,
-          },
-        },
-        {
-          type: 'section',
-          fields: [
+          color,
+          blocks: [
             {
-              type: 'mrkdwn',
-              text: `*Finding ID:*\n${alert.findingId}`,
+              type: 'header',
+              text: {
+                type: 'plain_text',
+                text: `${emoji} ${title} ${alert.isFirstSeen ? '(New)' : '(Duplicate)'}`,
+                emoji: true,
+              },
             },
             {
-              type: 'mrkdwn',
-              text: `*Time:*\n${(alert.timestamp || new Date()).toISOString()}`,
+              type: 'section',
+              fields: [
+                {
+                  type: 'mrkdwn',
+                  text: `*Host:*\n${host}`,
+                },
+                {
+                  type: 'mrkdwn',
+                  text: `*Path:*\n${path}`,
+                },
+                {
+                  type: 'mrkdwn',
+                  text: `*Error:*\n${normalizedError}`,
+                },
+                {
+                  type: 'mrkdwn',
+                  text: `*Latency:*\n${alert.latencyMs ? `${alert.latencyMs}ms (${latencyBucket})` : 'N/A'}`,
+                },
+                ...(alert.status
+                  ? [
+                      {
+                        type: 'mrkdwn',
+                        text: `*Status:*\nHTTP ${alert.status}`,
+                      },
+                    ]
+                  : []),
+                {
+                  type: 'mrkdwn',
+                  text: `*Time:*\n${(alert.timestamp || new Date()).toISOString()}`,
+                },
+              ],
             },
-            ...(alert.latencyMs
-              ? [
-                  {
-                    type: 'mrkdwn',
-                    text: `*Latency:*\n${alert.latencyMs}ms`,
-                  },
-                ]
-              : []),
-            ...(alert.status
-              ? [
-                  {
-                    type: 'mrkdwn',
-                    text: `*Status:*\n${alert.status}`,
-                  },
-                ]
-              : []),
-            ...(alert.fingerprint
-              ? [
-                  {
-                    type: 'mrkdwn',
-                    text: `*Fingerprint:*\n\`${alert.fingerprint.substring(0, 16)}...\``,
-                  },
-                ]
-              : []),
-          ],
-        },
-        {
-          type: 'actions',
-          elements: buttons,
-        },
-        {
-          type: 'context',
-          elements: [
             {
-              type: 'mrkdwn',
-              text: '💡 Click an action button above to manage this alert',
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `*Links:* <${baseUrl}/admin/runs/${alert.runId || 'unknown'}|Open Run> • <${baseUrl}/admin/findings/${alert.findingId}|Open Finding> • <${baseUrl}/api/artifacts/${alert.findingId}|Artifacts>`,
+              },
+            },
+            {
+              type: 'actions',
+              elements: [
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: '🔄 Re-verify now',
+                    emoji: true,
+                  },
+                  style: 'primary',
+                  value: JSON.stringify({ action: 'reverify', findingId: alert.findingId }),
+                  action_id: 'reverify_button',
+                },
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: '🔇 Suppress 24h',
+                    emoji: true,
+                  },
+                  style: 'danger',
+                  value: JSON.stringify({ action: 'suppress24h', findingId: alert.findingId }),
+                  action_id: 'suppress_button',
+                },
+              ],
+            },
+            {
+              type: 'context',
+              elements: [
+                {
+                  type: 'mrkdwn',
+                  text: `Fingerprint: \`${alert.fingerprint?.substring(0, 16)}...\` | Finding ID: \`${alert.findingId}\``,
+                },
+              ],
             },
           ],
         },
@@ -180,6 +187,7 @@ export async function sendSlackAlert(alert: SlackAlert): Promise<void> {
       findingId: alert.findingId,
       errorType: alert.errorType,
       url: alert.url,
+      isFirstSeen: alert.isFirstSeen,
     });
 
     // Record metric
