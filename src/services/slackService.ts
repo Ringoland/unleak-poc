@@ -3,6 +3,7 @@ import { config } from '../config';
 import { logger } from '../utils/logger';
 import { recordSlackAlert } from '../utils/metrics';
 import { normalizeError } from '../utils/fingerprint';
+import { getBaseUrl } from '../utils/baseUrl';
 
 export interface SlackAlert {
   findingId: string;
@@ -32,7 +33,7 @@ export async function sendSlackAlert(alert: SlackAlert): Promise<void> {
 
   try {
     // Build the base URL for action links
-    const baseUrl = process.env.BASE_URL || 'http://localhost:8000';
+    const baseUrl = process.env.BASE_URL || getBaseUrl();
 
     // Extract host and path
     const host = alert.host || new URL(alert.url).hostname;

@@ -74,7 +74,8 @@ async function createStabilityRun(): Promise<string> {
 
   // Create the run via API (proper contract)
   const axios = (await import('axios')).default;
-  const baseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
+  const { getDefaultBaseUrl } = await import('../utils/baseUrl');
+  const baseUrl = process.env.API_BASE_URL || getDefaultBaseUrl();
   
   try {
     const response = await axios.post(`${baseUrl}/api/runs`, {

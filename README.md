@@ -206,7 +206,7 @@ curl http://localhost:8000/health
 
 **Create a test run:**
 ```bash
-curl -X POST http://localhost:8000/api/scan \
+curl -X POST http://localhost:8000/api/runs \
   -H "Content-Type: application/json" \
   -d '{"urls": ["https://example.com"]}'
 
@@ -215,6 +215,10 @@ curl -X POST http://localhost:8000/api/scan \
 
 **View queue dashboard:**
 ```
+# Enable admin routes first
+ADMIN_ENABLED=true
+
+# Then access:
 Open: http://localhost:8000/admin/queues
 Login: admin / admin (change in .env)
 ```
