@@ -6,6 +6,7 @@ import { logger } from '../utils/logger';
 import { recordReverifyRequest } from '../utils/metrics';
 import { randomUUID } from 'crypto';
 import { createSafeLogMetadata } from '../utils/redact';
+import { addScanJob } from './queueService';
 
 const IDEMPOTENCY_TTL_SECONDS = 120;
 const RATE_LIMIT_WINDOW_SECONDS = 3600; // 1 hour
@@ -198,11 +199,18 @@ export async function reverifyFinding(request: ReverifyRequest): Promise<Reverif
       result: 'ok',
     });
 
-    // TODO: Enqueue re-scan job to the scan queue
-    // For now, we'll log the intent
-    logger.info('reverify.ok', createSafeLogMetadata({
+    // Enqueue re-scan job to the scan queue (same path as Day 2/3)
+    // This will trigger the scan worker → fetcher → breaker → render pipeline
+    const scanJob = await addScanJob({
+      findingId,
+      url: finding.url,
+      scanType: 'reverify',
+    });
+
+    logger.info('reverify.enqueued', createSafeLogMetadata({
       findingId,
       jobId,
+      scanJobId: scanJob.id,
       url: finding.url,
       source,
       remainingAttempts: remaining,
@@ -212,7 +220,7 @@ export async function reverifyFinding(request: ReverifyRequest): Promise<Reverif
     return {
       ok: true,
       result: 'ok',
-      jobId,
+      jobId: scanJob.id || jobId,
       message: 'Re-verify request accepted',
       remainingAttempts: remaining,
     };
