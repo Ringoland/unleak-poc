@@ -1123,6 +1123,174 @@ Improved logging with concise single-line state transitions:
 
 ---
 
+## Day-8: Actionable Slack Buttons & Retention
+
+Day-8 enhances Slack alerts with secure link buttons and implements automated data retention.
+
+### 🎯 Key Updates
+
+- **🔘 Slack Link Buttons**: Secure GET-based actions with token authentication
+- **🔕 Suppress 24h by Fingerprint**: Manual suppression via Slack (24h TTL)
+- **📆 Automated Retention**: Daily cleanup job for findings/artifacts older than 7 days
+- **✅ Complete Suppression Flow**: allow-list → maintenance → robots → cooldown → suppress24h
+
+---
+
+### Slack Button Security
+
+Slack alerts now use **link buttons** instead of interactive components:
+
+```typescript
+// Re-verify button
+🔄 Re-verify now
+→ GET /api/slack/actions?action=reverify&findingId={uuid}&t={SLACK_ACTION_TOKEN}
+
+// Suppress 24h button
+🔇 Suppress 24h
+→ GET /api/slack/actions?action=suppress24h&findingId={uuid}&t={SLACK_ACTION_TOKEN}
+```
+
+**Authentication:**
+- Requires `t` query parameter matching `SLACK_ACTION_TOKEN` from `.env`
+- Invalid/missing token → 401 Unauthorized
+- Only accepts `reverify` or `suppress24h` actions
+- UUID validation on findingId
+
+**Configuration:**
+```bash
+# .env
+SLACK_ACTION_TOKEN=my-secret-token-123  # Change in production!
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+```
+
+---
+
+### Suppress 24h by Fingerprint
+
+Suppression now works by **fingerprint** (not finding ID) to block all future occurrences of the same error:
+
+**Flow:**
+1. User clicks "Suppress 24h" in Slack
+2. System resolves finding fingerprint from database
+3. Redis key `suppress:fp:{fingerprint}` set with 24h TTL
+4. All future findings with same fingerprint are suppressed
+5. Metrics: `unleak_findings_suppressed_total{reason="suppress24h"}` increments
+
+**Why Fingerprint?**
+- Finding IDs are unique per occurrence
+- Fingerprints identify identical errors across time
+- Suppressing by fingerprint prevents duplicate alerts for the same root cause
+
+**Redis Keys:**
+```redis
+suppress:fp:sha256:abc123...  # Suppression by fingerprint (24h TTL)
+reverify:idempotency:{findingId}  # Re-verify idempotency (120s TTL)
+reverify:count:{findingId}  # Rate limit counter (1h window)
+```
+
+---
+
+### Automated Retention (7 Days)
+
+Cleanup job deletes old findings and artifacts to maintain database performance.
+
+**Run Manually:**
+```bash
+pnpm cleanup:retention
+```
+
+**Schedule as Cron Job:**
+```bash
+# Daily at 2 AM
+0 2 * * * cd /path/to/unleak-poc && pnpm cleanup:retention >> logs/retention.log 2>&1
+```
+
+**What Gets Deleted:**
+- Findings older than `RETENTION_DAYS` (default: 7)
+- Associated artifacts (CASCADE)
+- Physical files from `artifacts/` directory
+- Empty directories
+
+**Configuration:**
+```bash
+# .env
+RETENTION_DAYS=7  # Days to retain data
+```
+
+**Sample Output:**
+```
+[Retention] Starting cleanup for data older than 7 days
+[Retention] Found 45 artifacts to clean up
+[Retention] Deleted 45 artifact records from database
+[Retention] Deleted 23 finding records from database
+[Retention] Cleanup complete:
+  artifactsDeleted: 45
+  findingsDeleted: 23
+  filesDeleted: 42
+```
+
+---
+
+### Complete Suppression Precedence
+
+Rules engine applies checks in this order (all must pass for alert to send):
+
+```
+1. ❌ Allow-list      → URL not in allow-list.csv
+2. ❌ Maintenance     → Active maintenance window
+3. ❌ Robots.txt      → Disallowed by robots.txt
+4. ❌ Cooldown        → Same fingerprint within COOLDOWN_MINUTES
+5. ❌ Suppress 24h    → Manually suppressed via Slack
+6. ✅ Alert Sent      → All checks passed
+```
+
+**Metrics:**
+```promql
+unleak_findings_suppressed_total{reason="allowlist"}
+unleak_findings_suppressed_total{reason="maintenance"}
+unleak_findings_suppressed_total{reason="robots"}
+unleak_findings_suppressed_total{reason="cooldown"}
+unleak_findings_suppressed_total{reason="suppress24h"}  # New!
+```
+
+---
+
+### Testing Slack Buttons
+
+**1. Trigger Alert:**
+```bash
+curl -X POST http://localhost:8000/api/runs \
+  -d '{"urls": ["https://httpstat.us/500"]}'
+```
+
+**2. Click "Suppress 24h" in Slack**
+- Browser opens with confirmation page
+- Fingerprint suppressed for 24 hours
+
+**3. Trigger Same Error Again:**
+```bash
+curl -X POST http://localhost:8000/api/runs \
+  -d '{"urls": ["https://httpstat.us/500"]}'
+```
+
+**Expected:**
+- Finding created with `status='suppressed'`, `suppressionReason='suppress24h'`
+- No Slack alert sent
+- Metric `unleak_findings_suppressed_total{reason="suppress24h"}` increments
+
+**4. Test Re-verify:**
+```bash
+# Get findingId from previous run
+curl "http://localhost:8000/api/slack/actions?action=reverify&findingId={uuid}&t=my-secret-token-123"
+```
+
+**Expected:**
+- HTML page confirms re-verify request
+- Job enqueued (respects 120s idempotency + 5/hour rate limit)
+- Slack thread updated with result
+
+---
+
 ## Day-4: Rules Engine & Smart Suppression
 
 Day-4 adds intelligent finding management to reduce alert noise and improve operational efficiency.

@@ -98,7 +98,22 @@ export async function checkSuppression(
       };
     }
 
-    // Step 7: Record finding (not suppressed)
+    // Step 7: Check 24h manual suppression (from Slack button)
+    const suppressKey = `suppress:fp:${fingerprint}`;
+    const manualSuppression = await redis.get(suppressKey);
+    if (manualSuppression) {
+      logger.debug(
+        `[RulesEngine] Finding suppressed by 24h manual suppression: ${fingerprint.substring(0, 16)}...`
+      );
+      recordFindingSuppressed('suppress24h');
+      return {
+        suppressed: true,
+        reason: 'suppress24h',
+        fingerprint,
+      };
+    }
+
+    // Step 8: Record finding (not suppressed)
     const fingerprintData = await recordFinding(
       redis,
       fingerprint,

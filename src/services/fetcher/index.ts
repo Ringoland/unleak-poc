@@ -9,7 +9,7 @@ import { IFetcher, FetcherAdapterOptions, FetchOptions, FetchResult } from './ty
 import { createDirectFetcher } from './adapters/direct';
 import { createZenRowsFetcher } from './adapters/zenrows';
 import { logger } from '../../utils/logger';
-import { BreakerService } from '../breaker';
+import { BreakerService, getBreakerService } from '../breaker';
 import { config } from '../../config';
 import { sendSlackAlert } from '../slackService';
 import { nanoid } from 'nanoid';
@@ -264,17 +264,36 @@ export function createFetcher(options: FetcherFactoryOptions = {}): IFetcher {
 
   logger.info(`[Fetcher] Creating ${adapter} adapter`);
 
+  // Create the base adapter
+  let baseAdapter: IFetcher;
   switch (adapter) {
     case 'direct':
-      return createDirectFetcher(options);
+      baseAdapter = createDirectFetcher(options);
+      break;
 
     case 'zenrows':
-      return createZenRowsFetcher(options);
+      baseAdapter = createZenRowsFetcher(options);
+      break;
 
     default:
       logger.warn(`[Fetcher] Unknown adapter: ${adapter}, falling back to direct`);
-      return createDirectFetcher(options);
+      baseAdapter = createDirectFetcher(options);
   }
+
+  // Wrap with BreakerAwareFetcher if breaker is enabled
+  if (config.circuitBreaker.enabled) {
+    try {
+      const breakerService = getBreakerService();
+      logger.info('[Fetcher] Wrapping adapter with circuit breaker and Slack alerts');
+      return new BreakerAwareFetcher(baseAdapter, breakerService);
+    } catch (error) {
+      logger.warn('[Fetcher] Circuit breaker enabled but service not initialized, skipping wrapper');
+      logger.warn(`[Fetcher] Error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Return raw adapter if breaker is disabled or not available
+  return baseAdapter;
 }
 
 let defaultFetcherInstance: IFetcher | null = null;
