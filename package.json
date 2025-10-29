@@ -27,6 +27,7 @@
     "smoke:win": "powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1",
     "stability": "ts-node src/scripts/runStabilityTest.ts",
     "report:last": "ts-node src/scripts/reportLast.ts",
+    "cleanup:retention": "ts-node src/scripts/cleanupRetention.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

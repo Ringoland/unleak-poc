@@ -55,6 +55,7 @@ export const config = {
 
   // External services
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL || '',
+  slackActionToken: process.env.SLACK_ACTION_TOKEN || 'changeme',
   stripeApiKey: process.env.STRIPE_API_KEY || '',
 
   // Stripe Lite configuration
@@ -68,4 +69,10 @@ export const config = {
     robotsCacheTtlSeconds: parseInt(process.env.ROBOTS_CACHE_TTL_SECONDS || '600', 10),
     latencyMsThreshold: parseInt(process.env.LATENCY_MS_THRESHOLD || '1500', 10),
   },
+
+  // Rules & Retention
+  respectRobots: process.env.RESPECT_ROBOTS === 'true',
+  rulesJson: process.env.RULES_JSON || './config/rules.json',
+  retentionDays: parseInt(process.env.RETENTION_DAYS || '7', 10),
+  cooldownMinutes: parseInt(process.env.COOLDOWN_MINUTES || '10', 10),
 };
