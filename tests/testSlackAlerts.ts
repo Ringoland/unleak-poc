@@ -7,10 +7,10 @@
  */
 
 import 'dotenv/config';
-import { initializeRedis } from '../config/redis';
-import { initializeBreakerService } from '../services/breaker';
-import { initializeFetcher } from '../services/fetcher';
-import { logger } from '../utils/logger';
+import { initializeRedis } from '../src/config/redis';
+import { initializeBreakerService } from '../src/services/breaker';
+import { initializeFetcher } from '../src/services/fetcher';
+import { logger } from '../src/utils/logger';
 
 async function main() {
   logger.info('=== Testing Slack Alerts ===');

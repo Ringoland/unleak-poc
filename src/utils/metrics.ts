@@ -355,6 +355,17 @@ export function recordFingerprintDeduplication(action: 'new' | 'updated'): void 
 }
 
 /**
+ * Record run duration
+ */
+export function recordRunDuration(durationSeconds: number): void {
+  try {
+    runDurationHistogram.observe(durationSeconds);
+  } catch (error) {
+    logger.error('[Metrics] Error recording run duration', { error });
+  }
+}
+
+/**
  * Update active runs gauge
  */
 export function updateActiveRuns(count: number): void {

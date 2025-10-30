@@ -144,6 +144,7 @@ export class BreakerAwareFetcher implements IFetcher {
 
           if (!suppression.suppressed) {
             // Send Slack alert for 5xx error (non-blocking)
+            logger.info(`[breaker] Sending 5xx Slack alert for ${url}`);
             sendSlackAlert({
               findingId: nanoid(),
               url,
@@ -184,6 +185,7 @@ export class BreakerAwareFetcher implements IFetcher {
 
           if (!suppression.suppressed) {
             // Send Slack alert for network/timeout error (non-blocking)
+            logger.info(`[breaker] Sending ${errorType} Slack alert for ${url}`);
             sendSlackAlert({
               findingId: nanoid(),
               url,
@@ -264,17 +266,30 @@ export function createFetcher(options: FetcherFactoryOptions = {}): IFetcher {
 
   logger.info(`[Fetcher] Creating ${adapter} adapter`);
 
+  let baseAdapter: IFetcher;
   switch (adapter) {
     case 'direct':
-      return createDirectFetcher(options);
+      baseAdapter = createDirectFetcher(options);
+      break;
 
     case 'zenrows':
-      return createZenRowsFetcher(options);
+      baseAdapter = createZenRowsFetcher(options);
+      break;
 
     default:
       logger.warn(`[Fetcher] Unknown adapter: ${adapter}, falling back to direct`);
-      return createDirectFetcher(options);
+      baseAdapter = createDirectFetcher(options);
   }
+
+  // Wrap with circuit breaker if enabled
+  if (config.circuitBreaker.enabled) {
+    logger.info('[Fetcher] Wrapping adapter with circuit breaker and Slack alerts');
+    const { getBreakerService } = require('../breaker');
+    const breakerService = getBreakerService();
+    return new BreakerAwareFetcher(baseAdapter, breakerService);
+  }
+
+  return baseAdapter;
 }
 
 let defaultFetcherInstance: IFetcher | null = null;

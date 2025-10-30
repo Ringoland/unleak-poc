@@ -4,6 +4,13 @@ import { eq } from 'drizzle-orm';
 import { addScanJob } from './queueService';
 import { logger } from '../utils/logger';
 import { nanoid } from 'nanoid';
+import {
+  recordRunCreated,
+  recordRunStatus,
+  recordFindingCreated,
+  recordRunDuration,
+  updateActiveRuns,
+} from '../utils/metrics';
 
 export interface CreateRunInput {
   urls: string[];
@@ -56,6 +63,11 @@ export class RunService {
 
     logger.info(`Created run ${run.id} with ${validUrls.length} URLs`);
 
+    // Record metrics
+    recordRunCreated(runType);
+    recordRunStatus('queued');
+    updateActiveRuns(1); // Increment active runs
+
     // Create findings and enqueue jobs
     const createdFindings = [];
     const jobIds = [];
@@ -78,6 +90,9 @@ export class RunService {
 
         createdFindings.push(finding);
         logger.info(`Created finding ${finding.id} for URL: ${url}`);
+
+        // Record metrics
+        recordFindingCreated('scan', 'low');
 
         // Enqueue scan job (scan worker will then queue render job)
         const job = await addScanJob({
@@ -102,6 +117,9 @@ export class RunService {
           startedAt: new Date(),
         })
         .where(eq(runs.id, run.id));
+      
+      // Record status change
+      recordRunStatus('in_progress');
     }
 
     logger.info(
@@ -153,14 +171,25 @@ export class RunService {
     );
 
     if (allComplete) {
-      await db
+      const [updatedRun] = await db
         .update(runs)
         .set({
           status: 'completed',
           completedAt: new Date(),
           findingCount: runFindings.length,
         })
-        .where(eq(runs.id, runId));
+        .where(eq(runs.id, runId))
+        .returning();
+
+      // Record metrics
+      recordRunStatus('completed');
+      updateActiveRuns(-1); // Decrement active runs
+      
+      // Record run duration if we have startedAt
+      if (updatedRun.startedAt && updatedRun.completedAt) {
+        const durationSeconds = (updatedRun.completedAt.getTime() - updatedRun.startedAt.getTime()) / 1000;
+        recordRunDuration(durationSeconds);
+      }
 
       logger.info(`Run ${runId} marked as completed`);
       return true;
